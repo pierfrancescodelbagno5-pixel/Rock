@@ -623,10 +623,11 @@
     }
   }
 
-  function renderParticles(ctx, v) {
+  function renderParticles(ctx, v, q) {
     const x0 = v.x0, x1 = v.x1, y0 = v.y0, y1 = v.y1;
     const n = pAct.length;
     if (!n) return;
+    const halos = q > 0; // per-particle glow halos are decorative: skipped on 'low'
     // pass 1: normal blending (smoke, debris, goo)
     ctx.globalCompositeOperation = 'source-over';
     for (let i = 0; i < n; i++) {
@@ -645,7 +646,7 @@
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < n; i++) {
       const p = pAct[i];
-      if (!p.add && !p.glow) continue;
+      if (!p.add && !(halos && p.glow)) continue;
       const m = p.m;
       if (p.x < x0 - m || p.x > x1 + m || p.y < y0 - m || p.y > y1 + m) continue;
       const t = p.age / p.max;
@@ -653,7 +654,7 @@
       if (a <= 0.01) continue;
       const s = pSize(p, t);
       if (s <= 0.05) continue;
-      if (p.glow) {
+      if (halos && p.glow) {
         const gs = s * p.gm + 2;
         const ga = a * p.ga;
         ctx.globalAlpha = ga > 1 ? 1 : ga;
@@ -993,9 +994,13 @@
     }
   }
 
-  /* ======================================================= FLOATING TEXT */
-  const FONT_BASE = 32;
-  const FONT = '800 32px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  /* ======================================================= FLOATING TEXT
+   * Each number is rasterised ONCE at spawn into a pooled sprite canvas
+   * (outline + fill / crit gradient); per frame it is a single drawImage,
+   * because strokeText/fillText every frame is very slow on Android. */
+  const FONT_PX = 40;
+  const FONT = '800 40px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  const TEXT_PAD = 7;
   const outlineCache = new Map();
   function outlineFor(color) {
     const pc = parseColor(color);
@@ -1011,9 +1016,57 @@
     this.x = 0; this.y = 0; this.ox = 0; this.oy = 0; this.str = ''; this.color = '#fff';
     this.outline = '#000'; this.size = 16; this.crit = false; this.age = 0; this.max = 0.8;
     this.rise = 40; this.vx = 0; this.tilt = 0; this.pop = 0.22; this.glow = null;
+    this.cv = null; this.cw = 0; this.ch = 0;
   }
   const texts = new SmallPool(() => new FText(), 120);
-  let critGrad = null, critGradCtx = null;
+
+  /** Rasterise T.str into T's own (reused, grow-only) canvas. */
+  function bakeText(T) {
+    if (!T.cv) T.cv = makeCanvas(160, 64);
+    const cv = T.cv;
+    let g = cv.getContext('2d');
+    if (!g) { T.cw = 0; return; }
+    g.font = FONT;
+    const mw = g.measureText(T.str).width;
+    const tw = Math.ceil(mw > 0 ? mw : T.str.length * FONT_PX * 0.62);
+    const w = tw + TEXT_PAD * 2 + 4;
+    const h = Math.ceil(FONT_PX * 1.3) + TEXT_PAD * 2;
+    if (cv.width < w || cv.height < h) {
+      cv.width = Math.max(cv.width, w);
+      cv.height = Math.max(cv.height, h);
+      g = cv.getContext('2d');
+    } else {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+      g.clearRect(0, 0, cv.width, cv.height);
+    }
+    g.font = FONT;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.lineJoin = 'round';
+    g.miterLimit = 2;
+    const cx = w / 2, cy = h / 2;
+    g.strokeStyle = T.outline;
+    g.lineWidth = T.crit ? 11 : 9;
+    g.strokeText(T.str, cx, cy);
+    if (T.crit && T.color === '#ffd54f') {
+      const gr = g.createLinearGradient(0, cy - FONT_PX * 0.45, 0, cy + FONT_PX * 0.45);
+      gr.addColorStop(0, '#fffde7');
+      gr.addColorStop(0.45, '#ffd54f');
+      gr.addColorStop(1, '#ff8f00');
+      g.fillStyle = gr;
+    } else g.fillStyle = T.color;
+    g.fillText(T.str, cx, cy);
+    T.cw = w;
+    T.ch = h;
+  }
+
+  /** World-space multiplier that keeps numbers readable when the camera is zoomed out (phones). */
+  function textScale() {
+    const z = SK.cam.zoom || 1;
+    return U.clamp(0.95 / z, 1, 1.7);
+  }
 
   function fmtValue(v) {
     if (typeof v === 'number') {
@@ -1043,17 +1096,18 @@
     const crit = !!o.crit;
     const size = (o.size || 16) * (crit ? 1.55 : 1);
     // stack fresh numbers spawned near each other so they never overlap
+    const ts = textScale();
     let stack = 0;
     const tA = texts.act;
     for (let i = 0; i < tA.length; i++) {
       const q = tA[i];
       if (q === T || q.age > 0.32) continue;
-      if (Math.abs(q.ox - x) < 30 && Math.abs(q.oy - y) < 26) stack++;
+      if (Math.abs(q.ox - x) < 34 * ts && Math.abs(q.oy - y) < 30 * ts) stack++;
     }
     stack = stack % 6;
     T.ox = x; T.oy = y;
-    T.x = x + (rand() - 0.5) * 12 + (stack & 1 ? 9 : stack ? -9 : 0);
-    T.y = y - stack * size * 0.78;
+    T.x = x + ((rand() - 0.5) * 12 + (stack & 1 ? 10 : stack ? -10 : 0)) * ts;
+    T.y = y - stack * size * ts * 0.95;
     T.str = s;
     T.crit = crit;
     T.color = crit ? o.critColor || '#ffd54f' : o.color || '#ffffff';
@@ -1063,9 +1117,10 @@
     T.max = Math.max(0.2, o.life == null ? (crit ? 1.0 : 0.8) : o.life);
     T.rise = (o.rise == null ? 40 : o.rise) * (crit ? 1.2 : 1);
     T.vx = (rand() - 0.5) * 18;
-    T.tilt = crit ? (rand() - 0.5) * 0.36 : (rand() - 0.5) * 0.08;
+    T.tilt = crit ? (rand() < 0.5 ? -1 : 1) * (0.12 + rand() * 0.14) : 0;
     T.pop = crit ? 0.3 : 0.22;
     T.glow = crit ? getSprite(SPR_GLOW, T.color, 48) : null;
+    bakeText(T);
     if (crit) {
       burst(x, y, {
         count: 7, colors: [T.color, '#fff8e1', '#ffab00'], speed: [90, 230], life: [0.25, 0.5],
@@ -1087,8 +1142,7 @@
   function renderTexts(ctx, v, q) {
     const a = texts.act;
     if (!a.length) return;
-    const z = SK.cam.zoom || 1;
-    const ts = U.clamp(0.95 / z, 1, 1.7); // keep numbers readable on small phone screens
+    const ts = textScale();
     // crit halos (additive) first
     if (q > 0) {
       ctx.globalCompositeOperation = 'lighter';
@@ -1105,19 +1159,9 @@
       }
     }
     ctx.globalCompositeOperation = 'source-over';
-    ctx.font = FONT;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    if (critGradCtx !== ctx || !critGrad) {
-      critGrad = ctx.createLinearGradient(0, -FONT_BASE * 0.45, 0, FONT_BASE * 0.45);
-      critGrad.addColorStop(0, '#fffde7');
-      critGrad.addColorStop(0.45, '#ffd54f');
-      critGrad.addColorStop(1, '#ff8f00');
-      critGradCtx = ctx;
-    }
     for (let i = 0; i < a.length; i++) {
       const T = a[i];
+      if (!T.cw) continue;
       const t = T.age / T.max;
       const y = T.y - T.rise * E.outCubic(t);
       const x = T.x + T.vx * t;
@@ -1127,19 +1171,20 @@
       if (t > 0.75) sc *= 1 - 0.3 * ((t - 0.75) / 0.25);
       const al = t < 0.55 ? 1 : 1 - inQuad((t - 0.55) / 0.45);
       if (al <= 0.01) continue;
-      const k = (T.size * sc * ts) / FONT_BASE;
-      if (!(k > 0.01)) continue;
-      ctx.save();
-      ctx.translate(x, y);
-      if (T.tilt) ctx.rotate(T.tilt * (1 - tp * 0.7));
-      ctx.scale(k, k);
+      const k = (T.size * sc * ts) / FONT_PX; // world units per sprite pixel
+      if (!(k > 0.005)) continue;
+      const dw = T.cw * k, dh = T.ch * k;
       ctx.globalAlpha = al;
-      ctx.strokeStyle = T.outline;
-      ctx.lineWidth = T.crit ? 8.5 : 7;
-      ctx.strokeText(T.str, 0, 0);
-      ctx.fillStyle = T.crit && !(T.color !== '#ffd54f') ? critGrad : T.color;
-      ctx.fillText(T.str, 0, 0);
-      ctx.restore();
+      if (T.tilt && tp < 1) {
+        // crits slam in with a tilt that straightens out during the pop
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(T.tilt * (1 - E.outCubic(tp)));
+        ctx.drawImage(T.cv, 0, 0, T.cw, T.ch, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(T.cv, 0, 0, T.cw, T.ch, x - dw / 2, y - dh / 2, dw, dh);
+      }
     }
   }
 
@@ -1248,7 +1293,7 @@
     return c;
   }
 
-  /** Rotating god-rays. opts {count=10, color='#fff6c8', life=1.2, radius=260, spin, follow /*entity*/, alpha}. */
+  /** Rotating god-rays. opts {count=10, color='#fff6c8', life=1.2, radius=260, spin, follow (entity), alpha}. */
   function lightRays(x, y, opts) {
     const o = opts || EMPTY;
     const R = rays.get();
@@ -1746,13 +1791,15 @@
   }
   function onResize() {
     vigCache.clear();
+    overlayCache.clear();
+    ovW = -1;
     scrW = SK.W; scrH = SK.H;
   }
   if (SK.events && SK.events.on) SK.events.on('resize', onResize);
 
   /* --- colour grading per biome: a stretched vertical gradient strip */
   const GRADES = {
-    cave: [[0, '#4dd0e1', 0.075], [0.45, '#4dd0e1', 0], [0.6, '#2a1470', 0], [1, '#2a1470', 0.17]],
+    cave: [[0, '#4dd0e1', 0.075], [0.45, '#4dd0e1', 0], [0.6, '#1a237e', 0], [1, '#1a237e', 0.16]],
     forest: [[0, '#ffe082', 0.075], [0.45, '#ffe082', 0], [0.6, '#003c28', 0], [1, '#003c28', 0.17]],
     volcano: [[0, '#140500', 0.2], [0.42, '#140500', 0], [0.62, '#ff5722', 0], [1, '#ff5722', 0.13]],
     demon: [[0, '#7828c8', 0.12], [0.45, '#7828c8', 0], [0.6, '#a00028', 0], [1, '#a00028', 0.17]],
@@ -1781,7 +1828,28 @@
     gradeCache.set(id, c);
     return c;
   }
-  let gradeCur = null, gradePrev = null, gradeMix = 1, gradeKey = null;
+  /* Base overlay = biome grading + permanent soft vignette pre-composited into
+   * one low-res canvas, so the steady state costs a single full-screen blit. */
+  const overlayCache = new Map();
+  let ovCur = null, ovPrev = null, ovMix = 1, ovBiome = null, ovQ = -1, ovW = -1, ovH = -1;
+
+  function overlayFor(biome, bkey, q) {
+    const key = bkey + '|' + q;
+    let c = overlayCache.get(key);
+    if (c) return c;
+    const vw = Math.max(32, Math.round(scrW / 4)), vh = Math.max(24, Math.round(scrH / 4));
+    c = makeCanvas(vw, vh);
+    const g = c.getContext('2d');
+    if (g) {
+      if (q > 0 && biome) g.drawImage(gradeFor(biome), 0, 0, vw, vh);
+      g.globalAlpha = VIGNETTE_BASE[q];
+      g.drawImage(vignetteFor('#02030a'), 0, 0, vw, vh);
+      g.globalAlpha = 1;
+    }
+    if (overlayCache.size > 16) overlayCache.clear();
+    overlayCache.set(key, c);
+    return c;
+  }
 
   function currentBiome() {
     if (ambBiome && SK.time.t - ambLastT < 1) return ambBiome;
@@ -1808,30 +1876,27 @@
     try {
       ctx.globalCompositeOperation = 'source-over';
 
-      // 1) biome colour grading (crossfades on biome change)
+      // 1+2) biome colour grading + permanent soft vignette (crossfades on biome change)
       const biome = currentBiome();
-      if (q > 0 && biome) {
-        const key = biome.id != null ? String(biome.id) : 'default';
-        if (key !== gradeKey) {
-          gradePrev = gradeCur;
-          gradeCur = gradeFor(biome);
-          gradeKey = key;
-          gradeMix = gradePrev ? 0 : 1;
-        }
-        if (gradeMix < 1) gradeMix = Math.min(1, gradeMix + rdt / 1.5);
-        if (gradePrev && gradeMix < 1) {
-          ctx.globalAlpha = 1 - gradeMix;
-          ctx.drawImage(gradePrev, 0, 0, W, H);
-        }
-        if (gradeCur) {
-          ctx.globalAlpha = gradeMix;
-          ctx.drawImage(gradeCur, 0, 0, W, H);
-        }
+      const bkey = biome ? (biome.id != null ? String(biome.id) : 'default') : 'none';
+      if (bkey !== ovBiome || q !== ovQ || W !== ovW || H !== ovH) {
+        const fresh = overlayFor(biome, bkey, q);
+        if (bkey !== ovBiome && ovCur && ovBiome !== null) { ovPrev = ovCur; ovMix = 0; }
+        else { ovPrev = null; ovMix = 1; }
+        ovCur = fresh;
+        ovBiome = bkey; ovQ = q; ovW = W; ovH = H;
       }
-
-      // 2) permanent soft vignette
-      ctx.globalAlpha = VIGNETTE_BASE[q];
-      ctx.drawImage(vignetteFor('#02030a'), 0, 0, W, H);
+      if (ovMix < 1) ovMix = Math.min(1, ovMix + rdt / 1.5);
+      if (ovPrev && ovMix < 1) {
+        ctx.globalAlpha = 1 - ovMix;
+        ctx.drawImage(ovPrev, 0, 0, W, H);
+        ctx.globalAlpha = ovMix;
+        ctx.drawImage(ovCur, 0, 0, W, H);
+      } else {
+        ovPrev = null;
+        ctx.globalAlpha = 1;
+        ctx.drawImage(ovCur, 0, 0, W, H);
+      }
 
       // 3) low-HP heartbeat
       const G = SK.G;
@@ -1851,7 +1916,7 @@
         const beat = Math.exp(-d1 * d1) + 0.6 * Math.exp(-d2 * d2);
         ctx.globalAlpha = Math.min(1, hpPulse * (0.35 + 0.65 * beat) * 0.85);
         ctx.drawImage(vignetteFor('#ff1744'), 0, 0, W, H);
-        if (q > 0) {
+        if (q > 0 && beat > 0.15) {
           ctx.globalAlpha = hpPulse * beat * 0.06;
           ctx.fillStyle = '#ff1744';
           ctx.fillRect(0, 0, W, H);
@@ -1986,8 +2051,8 @@
   function evolveBurst(x, y, color) {
     const col = parseColor(color || '#b388ff').key;
     const light = mixKey(col, '#ffffff', 0.6);
-    flash(light, 0.4, 0.6);
-    lightRays(x, y, { count: 16, color: light, life: 1.8, radius: 520 });
+    flash(light, 0.3, 0.55);
+    lightRays(x, y, { count: 16, color: light, life: 1.8, radius: 520, alpha: 0.85 });
     const radii = [150, 240, 340, 460, 600];
     const delays = [0, 0.07, 0.16, 0.28, 0.42];
     const cols = ['#ffffff', col, light, col, light];
@@ -1997,7 +2062,7 @@
         fill: i === 0, delay: delays[i],
       });
     }
-    glowPuff(x, y, 300, 60, 0.8, light, 0.9);
+    glowPuff(x, y, 260, 50, 0.8, light, 0.72);
     burst(x, y, {
       count: 50, colors: ['#ffffff', light, col], speed: [300, 900], life: [0.3, 0.8], size: [2, 4],
       shape: 'spark', drag: 3,
@@ -2120,7 +2185,7 @@
       renderGhosts(ctx, v);
       renderRays(ctx, v);
       renderBeams(ctx, v);
-      renderParticles(ctx, v);
+      renderParticles(ctx, v, q);
       renderRings(ctx, v, q);
       renderSlashes(ctx, v, q);
       renderBolts(ctx, v, q);
