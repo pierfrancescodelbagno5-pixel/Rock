@@ -18,7 +18,7 @@
   const KEY = 'slimeReborn.3d.v1';
   let S;
   try { S = JSON.parse(localStorage.getItem(KEY)); } catch (e) { S = null; }
-  S = Object.assign({ runes: 0, level: 1, vig: 10, end: 10, mnd: 10, str: 10, grace: 0, bosses: {}, flasks: 4, stain: null, essences: 0, found: { 0: true } }, S || {});
+  S = Object.assign({ runes: 0, level: 1, vig: 10, end: 10, mnd: 10, str: 10, grace: 0, bosses: {}, flasks: 4, stain: null, essences: 0, found: { 0: true }, forms: { slime: true, human: true } }, S || {});
   const saveS = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } };
   const mythic = ch.cls === 'pierfrancesco';
   const CLS = {
@@ -287,7 +287,7 @@
   const P = {
     x: LOC.grace[S.grace].x, z: LOC.grace[S.grace].z + 3, y: 0, vx: 0, vz: 0, vy: 0, rot: Math.PI,
     hp: 0, maxHp: 0, fp: 0, maxFp: 0, st: 0, maxSt: 0, dmg: 1, flasks: S.flasks, r: 0.9,
-    roll: 0, iframe: 0, atk: null, combo: 0, comboT: 0, stun: 0, stCd: 0, dead: false, absorb: 0, auraT: 0, judT: 18, hitFlash: 0,
+    form: 'slime', formFx: 0, roll: 0, iframe: 0, atk: null, combo: 0, comboT: 0, stun: 0, stCd: 0, dead: false, absorb: 0, auraT: 0, judT: 18, hitFlash: 0,
   };
   function recalc(full) {
     P.maxHp = Math.round((300 + (S.vig - 10) * 28) * CLS.hp);
@@ -398,6 +398,62 @@
         { name: 'storm', range: 40, windup: 1.0, active: 0.1, recover: 1.0, dmg: 90, phase2: true, bolts: 7 },
       ] },
   };
+  /* ------------------------------------------------------------ Mimetismo: player forms */
+  const human = (() => {
+    const root = new T.Group(), g = new T.Group(); root.add(g);
+    const skin = lam('#f1d7c4'), coat = lam('#eef2f8'), trim = lam('#d9b44a'), dark = lam('#262a36');
+    const hair = lam(ch.color || '#7fd4ff'), eye = new T.MeshBasicMaterial({ color: '#ffcc33' });
+    const legL = pivot(g, -0.16, 0.95, 0), legR = pivot(g, 0.16, 0.95, 0);
+    part(legL, dark, 0.22, 0.95, 0.24, 0, -0.47, 0); part(legR, dark, 0.22, 0.95, 0.24, 0, -0.47, 0);
+    part(legL, trim, 0.24, 0.12, 0.3, 0, -0.92, 0.04); part(legR, trim, 0.24, 0.12, 0.3, 0, -0.92, 0.04);
+    const torso = part(g, coat, 0.62, 0.78, 0.36, 0, 1.36, 0);
+    part(g, coat, 0.7, 0.5, 0.4, 0, 0.92, -0.02); // coat skirt
+    part(g, trim, 0.64, 0.08, 0.38, 0, 1.0, 0); part(g, trim, 0.06, 0.78, 0.38, 0, 1.36, 0.01);
+    const head = pivot(g, 0, 1.98, 0);
+    part(head, skin, 0.42, 0.46, 0.4, 0, 0, 0.02);
+    part(head, hair, 0.48, 0.18, 0.46, 0, 0.24, -0.01); // crown of hair
+    part(head, hair, 0.5, 0.42, 0.14, 0, 0.02, -0.2); // back
+    part(head, hair, 0.5, 0.75, 0.2, 0, -0.32, -0.26); // long hair
+    part(head, hair, 0.14, 0.38, 0.14, -0.22, 0.02, 0.17); part(head, hair, 0.14, 0.38, 0.14, 0.22, 0.02, 0.17); // side locks
+    part(head, hair, 0.36, 0.1, 0.1, 0, 0.17, 0.21); // fringe
+    part(head, eye, 0.08, 0.07, 0.02, -0.1, 0.02, 0.23); part(head, eye, 0.08, 0.07, 0.02, 0.1, 0.02, 0.23);
+    const armL = pivot(g, -0.42, 1.7, 0), armR = pivot(g, 0.42, 1.7, 0);
+    part(armL, coat, 0.18, 0.7, 0.2, 0, -0.35, 0); part(armR, coat, 0.18, 0.7, 0.2, 0, -0.35, 0);
+    part(armL, skin, 0.13, 0.16, 0.14, 0, -0.76, 0); part(armR, skin, 0.13, 0.16, 0.14, 0, -0.76, 0);
+    const sword = new T.Group(); sword.position.set(0, -0.8, 0.05); armR.add(sword);
+    part(sword, trim, 0.32, 0.06, 0.1, 0, 0, 0); part(sword, dark, 0.06, 0.22, 0.06, 0, 0.12, 0);
+    const bl = part(sword, new T.MeshBasicMaterial({ color: '#9ff3ff' }), 0.07, 1.5, 0.03, 0, -0.78, 0);
+    let crown = null;
+    if (mythic) {
+      const gm = new T.MeshStandardMaterial({ color: '#ffcf40', metalness: 0.8, roughness: 0.25, emissive: '#5a3a00' });
+      crown = new T.Mesh(new T.CylinderGeometry(0.26, 0.28, 0.12, 10, 1, true), gm); crown.position.y = 0.38; head.add(crown);
+      for (let i = 0; i < 5; i++) { const c = new T.Mesh(new T.ConeGeometry(0.05, 0.18, 5), gm), a = (i / 5) * TAU; c.position.set(Math.cos(a) * 0.27, 0.13, Math.sin(a) * 0.27); crown.add(c); }
+    }
+    root.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    root.visible = false; scene.add(root);
+    return { root, g, legL, legR, armL, armR, head, sword, blade: bl, torso };
+  })();
+  const wolfForm = (() => {
+    const m = wolfModel();
+    m.root.scale.setScalar(1.35);
+    m.root.traverse((o) => { if (o.isMesh) { o.material = o.material.clone(); if (o.material.color.getHex() === 0x4b4740) o.material.color.set('#2c3f5e'); if (o.material.color.getHex() === 0x2b2824) o.material.color.set('#1a2236'); } });
+    m.root.visible = false; scene.add(m.root);
+    return m;
+  })();
+  const FORM_NAMES = { slime: 'Slime', human: 'Forma Umana', wolf: 'Lupo Tempesta' };
+  const FORM = { slime: { speed: 1, dmg: 1, reach: 0, cam: 1.4 }, human: { speed: 1.08, dmg: 1.3, reach: 0.9, cam: 1.8 }, wolf: { speed: 1.55, dmg: 1.1, reach: -0.2, cam: 1.5 } };
+  function transform() {
+    const list = ['slime', 'human', 'wolf'].filter((f) => S.forms[f]);
+    const next = list[(list.indexOf(P.form) + 1) % list.length];
+    if (next === P.form || P.atk || P.roll > 0) return;
+    P.form = next; P.formFx = 0.5;
+    const gy = heightAt(P.x, P.z);
+    emit(P.x, gy + 1.2, P.z, 70, next === 'human' ? '#bfefff' : next === 'wolf' ? '#6aa8ff' : '#4fc3ff', { speed: 6, up: 2, grav: 0, life: 1.2 });
+    shockwave(P.x, P.z, 4, 0, '#bfefff');
+    flashLight.color.set('#bfefff'); flashLight.intensity = 50; flashLight.position.set(P.x, gy + 3, P.z);
+    sfx('skillGet'); toast('《Mimetismo: ' + FORM_NAMES[next] + '》');
+  }
+
   const enemies = [];
   const barMat = new T.SpriteMaterial({ color: '#b3261e', depthTest: false });
   const barBg = new T.SpriteMaterial({ color: '#000000', opacity: 0.6, transparent: true, depthTest: false });
@@ -492,7 +548,7 @@
   /* ------------------------------------------------------------ input */
   const input = { mx: 0, mz: 0, keys: {}, pressed: {}, yaw: Math.PI, pitch: 0.35, lock: null };
   const press = (k) => { input.pressed[k] = true; };
-  const KEYS = { ShiftLeft: 'run', KeyM: 'map', KeyJ: 'light', KeyK: 'heavy', Space: 'roll', KeyQ: 'lock', KeyR: 'flask', KeyE: 'interact', KeyF: 'skill', KeyG: 'absorb', Escape: 'pause', KeyP: 'pause' };
+  const KEYS = { KeyT: 'form', ShiftLeft: 'run', KeyM: 'map', KeyJ: 'light', KeyK: 'heavy', Space: 'roll', KeyQ: 'lock', KeyR: 'flask', KeyE: 'interact', KeyF: 'skill', KeyG: 'absorb', Escape: 'pause', KeyP: 'pause' };
   window.addEventListener('keydown', (e) => {
     try { SK.Audio.init(); SK.Audio.resume(); } catch (er) { /* ignore */ }
     input.keys[e.code] = true;
@@ -529,7 +585,7 @@
   // on-screen buttons
   const touchEl = $('touch');
   const BTN = [['light', 'Attacco', 66, 96, 34, 'big'], ['heavy', 'Colpo<br>pesante', 140, 60, 26], ['roll', 'Schiva', 140, 140, 28],
-    ['skill', 'Fulmine<br>Nero', 66, 178, 24], ['absorb', 'Preda-<br>tore', 214, 104, 24], ['flask', 'Cura', 28, 252, 21], ['lock', 'Mira', 214, 178, 21], ['run', 'Corri', 214, 36, 21]];
+    ['skill', 'Fulmine<br>Nero', 66, 178, 24], ['absorb', 'Preda-<br>tore', 214, 104, 24], ['flask', 'Cura', 28, 252, 21], ['lock', 'Mira', 214, 178, 21], ['run', 'Corri', 214, 36, 21], ['form', 'Mime-<br>tismo', 140, 220, 23]];
   for (const [k, label, rx, by, r, cls] of BTN) {
     const b = document.createElement('div');
     b.className = 'tbtn' + (cls ? ' ' + cls : '');
@@ -649,8 +705,8 @@
     if (heavy) P.vy = 7;
   }
   function resolveAttack() {
-    const a = P.atk, reach = a.heavy ? 4 : 3.2, arc = a.heavy ? Math.PI : 1.2;
-    const base = (a.heavy ? 70 : [32, 36, 48][P.combo]) * P.dmg;
+    const F = FORM[P.form], a = P.atk, reach = (a.heavy ? 4 : 3.2) + F.reach, arc = a.heavy ? Math.PI : 1.2;
+    const base = (a.heavy ? 70 : [32, 36, 48][P.combo]) * P.dmg * F.dmg;
     let any = false;
     for (const e of enemies) {
       if (e.dead) continue;
@@ -704,7 +760,7 @@
         const a = Math.atan2(P.x - e.x, P.z - e.z);
         e.vx += Math.sin(a) * dt * 20; e.vz += Math.cos(a) * dt * 20;
         if (e.hp < e.maxHp * 0.3 || (mythic && e.hp < e.maxHp * 0.6)) {
-          killEnemy(e, true); S.essences++; P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.15); recalc(false); sfx('absorb');
+          if (e.type === 'wolf' && !S.forms.wolf) { S.forms.wolf = true; setTimeout(() => toast('《Analisi completata. Mimetismo acquisito: Lupo Tempesta》'), 1200); } killEnemy(e, true); S.essences++; P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.15); recalc(false); sfx('absorb');
         }
       }
     }
@@ -758,6 +814,7 @@
       if (pr.flask) drinkFlask();
     }
     if (pr.lock) toggleLock();
+    if (pr.form) transform();
     if (pr.run) { P.sprint = !P.sprint; toast(P.sprint ? 'Corsa attivata' : 'Corsa disattivata'); }
 
     if (P.roll > 0) {
@@ -772,8 +829,8 @@
       P.vx *= 1 - dt * 6; P.vz *= 1 - dt * 6;
     } else {
       const running = P.sprint && P.st > 1 && moveAmt > 0.3;
-      if (running) { P.st -= dt * 9; P.stCd = 0.5; if (Math.random() < dt * 20) emit(P.x, heightAt(P.x, P.z) + 0.2, P.z, 1, '#d8c39a', { speed: 1.5, up: 1 }); }
-      const sp = 7 * (P.absorb > 0 ? 0.5 : 1) * (mythic ? 1.25 : 1) * (running ? 1.85 : 1);
+      if (running) { P.st -= dt * (P.form === 'wolf' ? 3 : 9); P.stCd = 0.5; if (Math.random() < dt * 20) emit(P.x, heightAt(P.x, P.z) + 0.2, P.z, 1, '#d8c39a', { speed: 1.5, up: 1 }); }
+      const sp = 7 * FORM[P.form].speed * (P.absorb > 0 ? 0.5 : 1) * (mythic ? 1.25 : 1) * (running ? 1.85 : 1);
       P.vx = lerp(P.vx, wx * sp * moveAmt, dt * 10); P.vz = lerp(P.vz, wz * sp * moveAmt, dt * 10);
       if (moveAmt > 0.1) {
         const target = input.lock && !input.lock.dead ? Math.atan2(input.lock.x - P.x, input.lock.z - P.z) : Math.atan2(wx, wz);
@@ -796,8 +853,28 @@
     const gy = heightAt(P.x, P.z);
     updateAbsorb(dt);
 
-    // slime visuals
+    // form visuals
     const sp = Math.hypot(P.vx, P.vz), t = performance.now() / 1000;
+    slime.visible = P.form === 'slime'; human.root.visible = P.form === 'human'; wolfForm.root.visible = P.form === 'wolf';
+    P.formFx = Math.max(0, P.formFx - dt);
+    const pop = 1 + Math.sin(Math.min(1, P.formFx * 2) * Math.PI) * 0.25;
+    if (P.form === 'human') {
+      const h = human, k = P.atk ? P.atk.t / P.atk.dur : 0, walk = sp > 1 ? Math.sin(t * (sp > 9 ? 14 : 10)) * Math.min(1, sp / 7) : 0;
+      h.root.position.set(P.x, gy + P.y, P.z); h.root.rotation.y = P.rot; h.root.scale.setScalar(pop);
+      h.legL.rotation.x = walk * 0.8; h.legR.rotation.x = -walk * 0.8; h.armL.rotation.x = -walk * 0.6;
+      if (P.atk) {
+        if (P.atk.heavy) { h.g.rotation.y = k * TAU; h.armR.rotation.x = -1.5; h.armR.rotation.z = 0; }
+        else { const dir = P.combo % 2 ? -1 : 1; h.g.rotation.y = 0; h.armR.rotation.x = -1.4; h.armR.rotation.z = lerp(1.6 * dir, -1.4 * dir, Math.min(1, k * 2.2)); }
+      } else { h.g.rotation.y = 0; h.armR.rotation.x = walk * 0.5 - 0.15; h.armR.rotation.z = 0; }
+      h.g.rotation.x = P.roll > 0 ? (1 - P.roll / 0.45) * TAU : 0; h.g.position.y = P.roll > 0 ? 0.3 : Math.abs(walk) * 0.05;
+      h.blade.material.color.set(P.atk ? '#e6ffff' : '#9ff3ff');
+    } else if (P.form === 'wolf') {
+      const w = wolfForm, gal = sp > 1 ? t * (sp > 9 ? 18 : 13) : 0;
+      w.root.position.set(P.x, gy + P.y, P.z); w.root.rotation.y = P.rot; w.root.scale.setScalar(1.35 * pop);
+      w.legs.forEach((l, i) => { l.rotation.x = sp > 1 ? Math.sin(gal + (i % 2) * Math.PI + (i > 1 ? 1 : 0)) * 0.9 : 0; });
+      w.tail.rotation.x = 0.5 + Math.sin(t * 8) * 0.2; w.g.rotation.x = P.atk ? -Math.sin(P.atk.t / P.atk.dur * Math.PI) * 0.4 : 0;
+      if (sp > 9 && Math.random() < dt * 25) emit(P.x, gy + 0.6, P.z, 1, '#8ec5ff', { speed: 1, up: 1, grav: 0 });
+    }
     slime.position.set(P.x, gy + P.y + 0.85, P.z);
     slime.rotation.y = P.rot;
     let sx = 1 + Math.sin(t * 3) * 0.03, syv = 1 - Math.sin(t * 3) * 0.03;
@@ -805,7 +882,7 @@
     if (P.roll > 0) { syv = 0.6; sx = 1.3; body.rotation.x += dt * 20; } else body.rotation.x = lerp(body.rotation.x % TAU, 0, dt * 10);
     if (P.atk) { const k = P.atk.t / P.atk.dur; sx += Math.sin(k * Math.PI) * 0.25; syv -= Math.sin(k * Math.PI) * 0.15; }
     if (P.absorb > 0) { sx = 1.25 + Math.sin(t * 30) * 0.05; syv = 0.85; }
-    body.scale.set(sx, syv, sx);
+    body.scale.set(sx * pop, syv * pop, sx * pop);
     bodyMat.emissive.set(P.hitFlash > 0 ? '#ff2020' : P.iframe > 0 ? '#204060' : '#0a2a40');
     if (P.crown) P.crown.rotation.y += dt;
     blade.material.opacity = Math.max(0, blade.material.opacity - dt * 4);
@@ -1043,7 +1120,7 @@
     const box = $('pause').querySelector('.box');
     box.innerHTML = `<h2>Terre Spezzate</h2>
       <div class="muted">Sinistra: muoviti · Destra: trascina per girare la visuale<br>Attacco / Colpo pesante · Schiva (invulnerabile) · Mira (aggancia)<br>
-      Corri (consuma stamina) · Mappa: viaggio rapido tra le Luci di Grazia scoperte<br>Fulmine Nero (FP) · Predatore (divora i nemici indeboliti) · Cura (Gelatina Cremisi)<br>Tastiera: WASD, J/K, Spazio, Q, F, G, R, E, frecce<br>
+      Corri (consuma stamina) · Mappa: viaggio rapido tra le Luci di Grazia scoperte<br>Mimetismo: trasformati in Forma Umana (spada, più danno) o in Lupo Tempesta (dopo averne divorato uno)<br>Fulmine Nero (FP) · Predatore (divora i nemici indeboliti) · Cura (Gelatina Cremisi)<br>Tastiera: WASD, J/K, Spazio, Q, F, G, R, E, frecce<br>
       Riposa alle Luci di Grazia ✦ per salire di livello. Se cadi perdi le anime: recuperale dalla macchia verde.</div>
       <button id="p-go">Riprendi</button><button id="p-menu">Torna al Regno (menu principale)</button>`;
     $('p-go').addEventListener('click', () => { $('pause').classList.remove('open'); state = 'play'; });
@@ -1069,7 +1146,7 @@
     camPos.lerp(new T.Vector3(tx, ty, tz), Math.min(1, dt * 10));
     camera.position.copy(camPos);
     if (shake > 0) { camera.position.x += rand(-1, 1) * shake * 0.6; camera.position.y += rand(-1, 1) * shake * 0.6; shake = Math.max(0, shake - dt * 1.5); }
-    camLook.set(P.x, gy + P.y + 1.4, P.z);
+    camLook.set(P.x, gy + P.y + FORM[P.form].cam, P.z);
     if (input.lock && !input.lock.dead) camLook.lerp(new T.Vector3(input.lock.x, input.lock.y + (input.lock.d.boss ? 3 : 1), input.lock.z), 0.3);
     camera.lookAt(camLook);
     sun.position.set(P.x + 40, gy + 80, P.z + 30); sun.target.position.set(P.x, gy, P.z);
