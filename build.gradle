@@ -1,0 +1,5 @@
+// Root build file for Slime Reborn — L'Ascesa del Predatore (Android WebView wrapper).
+// The game itself lives in ../web and is packaged as the app's assets.
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

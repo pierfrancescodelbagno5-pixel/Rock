@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Back up the WebView's localStorage (save game) with the app data. -->
+<full-backup-content>
+    <include domain="root" path="app_webview/" />
+    <exclude domain="root" path="app_webview/Default/GPUCache/" />
+    <exclude domain="root" path="app_webview/Default/Code Cache/" />
+</full-backup-content>

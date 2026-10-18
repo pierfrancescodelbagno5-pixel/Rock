@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-tone silhouette for Android 13+ themed icons (eyes cut out). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,35.5C67,35.5 75.5,51.5 78.3,61.7C81.2,72.3 72.6,79 54,79C35.4,79 26.8,72.3 29.7,61.7C32.5,51.5 41,35.5 54,35.5Z M46,60.5m-5,0a5,6.6 0,1 0,10 0a5,6.6 0,1 0,-10 0Z M62,60.5m-5,0a5,6.6 0,1 0,10 0a5,6.6 0,1 0,-10 0Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M45.2,36.6L44,25.6L49.2,29.8L54,22.2L58.8,29.8L64,25.6L62.8,36.6Q54,38.8 45.2,36.6Z" />
+</vector>

@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.slimereborn.game'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.slimereborn.game'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // The whole HTML5 game (../web) is packaged as the APK assets:
+    // file:///android_asset/index.html is the entry point.
+    sourceSets {
+        main {
+            assets.srcDirs = ['../web']
+        }
+    }
+
+    androidResources {
+        // Keep audio-free text assets compressed, but never ship editor/OS junk.
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~:!*.md'
+    }
+
+    buildTypes {
+        debug {
+            versionNameSuffix '-debug'
+        }
+        release {
+            // Sideload build: no shrinking (the app is a thin WebView shell) and
+            // signed with the debug keystore so the release APK installs directly.
+            // For a Play Store upload, replace this with a real upload-key signingConfig.
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    lint {
+        checkReleaseBuilds true
+        abortOnError true
+        // targetSdk is pinned to 34 by the project spec; do not fail release builds on it.
+        disable 'ExpiredTargetSdkVersion', 'OldTargetApi'
+    }
+}

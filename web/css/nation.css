@@ -296,7 +296,7 @@
 .nt-vn.out { animation: ntFadeOut 0.3s ease both; }
 .nt-vnbg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .nt-vnport {
-  position: absolute; bottom: 0; left: 50%; height: 94%; aspect-ratio: 1 / 1; transform: translateX(-30%);
+  position: absolute; bottom: 0; left: 50%; height: 94%; width: min(94vh, 72vw); transform: translateX(-30%);
   pointer-events: none;
 }
 .nt-vnbox {
@@ -357,6 +357,18 @@
 }
 .nt-pop.big { font-size: 2.3em; }
 .nt-pop.gray { color: #c6c0d8; text-shadow: 0 2px 0 #1a1530; font-size: 1.2em; }
+.nt-toast {
+  position: absolute; left: 50%; top: calc(var(--sat, 0px) + 82px); transform: translateX(-50%);
+  max-width: min(560px, 90vw); padding: 8px 18px; border-radius: 999px; text-align: center;
+  font-size: 0.9em; font-weight: 700; color: #fff; white-space: normal;
+  background: rgba(20, 8, 34, 0.94); border: 1px solid rgba(255, 128, 171, 0.7);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5), 0 0 16px rgba(255, 110, 170, 0.25);
+  animation: ntToastIn 0.35s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.nt-toast + .nt-toast { top: calc(var(--sat, 0px) + 124px); }
+.nt-toast + .nt-toast + .nt-toast { top: calc(var(--sat, 0px) + 166px); }
+.nt-toast.out { animation: ntFadeOut 0.35s ease both; }
+@keyframes ntToastIn { from { opacity: 0; transform: translate(-50%, -14px) scale(0.92); } to { opacity: 1; transform: translate(-50%, 0); } }
 .nt-mini {
   position: absolute; font-size: 1.2em; color: #ff80ab; animation: ntMini 1.2s ease-out both;
   text-shadow: 0 0 8px rgba(255, 128, 171, 0.9);
