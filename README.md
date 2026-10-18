@@ -11,6 +11,9 @@ Scarica **[SlimeReborn.apk](SlimeReborn.apk)** sul telefono e aprilo (consenti "
 - Nazione con 6 compagne: affinità, regali, appuntamenti, matrimoni multipli
 - Grafica, musica ed effetti generati interamente dal codice
 
+## Terre Spezzate 3D
+Modalità action-RPG 3D low-poly (dal menu: **Terre Spezzate 3D**): mondo aperto, Luci di Grazia per riposare e salire di livello, schivata con stamina, aggancio del bersaglio, Fulmine Nero, Predatore, anime perse alla morte da recuperare, due boss (Gorvan il Tiranno Caduto e il Drago della Tempesta Antica).
+
 ## Comandi
 Touch: joystick a sinistra, pulsanti a destra (Predatore, Scatto, 3 abilità). Tastiera: WASD, Spazio, E, 1/2/3, F, Esc.
 

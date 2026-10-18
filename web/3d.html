@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0a08">
+<title>Slime Reborn — Terre Spezzate</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a08; color: #e9dfc4;
+    font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif; user-select: none; -webkit-user-select: none; touch-action: none; }
+  #game { position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #view { position: fixed; inset: 0; }
+  #view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  .bars { position: absolute; left: calc(14px + env(safe-area-inset-left)); top: 12px; }
+  .bar { height: 9px; margin-bottom: 5px; background: rgba(0,0,0,.55); border: 1px solid rgba(200,180,130,.45); position: relative; overflow: hidden; }
+  .bar i { position: absolute; left: 0; top: 0; bottom: 0; transition: width .15s; }
+  .bar b { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,240,200,.55); transition: width .8s .25s; }
+  #hp i { background: linear-gradient(#c33, #7a1010); } #fp i { background: linear-gradient(#3b6fd6, #1a3a8a); } #st i { background: linear-gradient(#4fa64a, #255f22); }
+  #flask { position: absolute; left: calc(14px + env(safe-area-inset-left)); top: 58px; font-size: 13px; color: #f0c870; text-shadow: 0 1px 2px #000; }
+  #runes { position: absolute; right: calc(16px + env(safe-area-inset-right)); bottom: 10px; font-size: 18px; color: #f3e2b0; text-shadow: 0 1px 3px #000; letter-spacing: 1px; }
+  #runes small { color: #c9b27a; font-size: 12px; }
+  #boss { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); width: min(62vw, 640px); display: none; }
+  #boss .name { font-size: 15px; margin-bottom: 3px; text-shadow: 0 1px 3px #000; }
+  #boss .bar { height: 10px; } #boss .bar i { background: linear-gradient(#b3261e, #6d0f0a); }
+  #msg { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: clamp(30px, 7vw, 64px); letter-spacing: 6px;
+    opacity: 0; transition: opacity 1.2s; text-shadow: 0 0 18px rgba(0,0,0,.9); }
+  #msg.show { opacity: 1; }
+  #msg.death { color: #a31d1d; background: linear-gradient(transparent, rgba(0,0,0,.75) 35%, rgba(0,0,0,.75) 65%, transparent); padding: 20px 0; }
+  #msg.gold { color: #f3d27a; background: linear-gradient(transparent, rgba(0,0,0,.6) 35%, rgba(0,0,0,.6) 65%, transparent); padding: 20px 0; }
+  #msg.place { color: #efe3c0; font-size: clamp(24px, 5vw, 44px); }
+  #toast { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-size: 15px; color: #f0e0b0; text-shadow: 0 1px 3px #000; opacity: 0; transition: opacity .4s; white-space: nowrap; }
+  #toast.show { opacity: 1; }
+  #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); padding: 6px 16px; background: rgba(10,8,4,.7);
+    border: 1px solid rgba(220,190,120,.5); font-size: 15px; display: none; pointer-events: auto; }
+  #reticle { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 6px #fff; display: none; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 1; transition: opacity 1.4s; pointer-events: none; }
+  /* touch controls */
+  #touch { position: fixed; inset: 0; pointer-events: none; }
+  .tbtn { position: absolute; pointer-events: auto; border-radius: 50%; border: 2px solid rgba(230,200,140,.55); background: rgba(20,16,10,.45);
+    color: #f1e3bd; font-size: 11px; display: flex; align-items: center; justify-content: center; text-align: center; line-height: 1.05; }
+  .tbtn.on { background: rgba(240,200,110,.35); }
+  .tbtn.big { font-size: 13px; }
+  #joy { position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(230,200,140,.35); display: none; }
+  #joy i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgba(240,210,150,.35); }
+  .panel { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); }
+  .panel.open { display: flex; }
+  .box { min-width: 280px; max-width: 92vw; max-height: 90vh; overflow: auto; padding: 18px 22px; background: linear-gradient(#1d1810, #0f0c07);
+    border: 1px solid rgba(220,190,120,.55); box-shadow: 0 0 40px rgba(240,190,90,.15); }
+  .box h2 { margin: 0 0 10px; font-weight: normal; color: #f3d27a; letter-spacing: 2px; text-align: center; }
+  .box button { display: block; width: 100%; margin: 6px 0; padding: 9px; font: inherit; font-size: 15px; color: #efe3c0; background: rgba(60,48,26,.6);
+    border: 1px solid rgba(220,190,120,.4); cursor: pointer; }
+  .box button:active { background: rgba(140,110,50,.6); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 5px 0; }
+  .row button { width: auto; display: inline-block; margin: 0; padding: 4px 14px; }
+  .muted { color: #a8987a; font-size: 13px; }
+  #rotate { position: fixed; inset: 0; background: #0b0a08; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; font-size: 18px; }
+  @media (orientation: portrait) and (max-width: 700px) { #rotate { display: flex; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="view"></div>
+<div id="hud">
+  <div class="bars"><div class="bar" id="hp"><b></b><i></i></div><div class="bar" id="fp"><b></b><i></i></div><div class="bar" id="st"><i></i></div></div>
+  <div id="flask"></div>
+  <div id="runes"></div>
+  <div id="boss"><div class="name"></div><div class="bar"><b></b><i></i></div></div>
+  <div id="reticle"></div>
+  <div id="toast"></div>
+  <div id="msg"></div>
+  <div id="prompt"></div>
+</div>
+<div id="touch"><div id="joy"><i></i></div></div>
+<div class="panel" id="grace"><div class="box"></div></div>
+<div class="panel" id="pause"><div class="box"></div></div>
+<div id="fade"></div>
+<div id="rotate">Ruota il telefono in orizzontale</div>
+<script src="lib/three.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js3d/game3d.js"></script>
+</body>
+</html>

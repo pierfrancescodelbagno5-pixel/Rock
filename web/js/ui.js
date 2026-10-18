@@ -905,6 +905,7 @@
     const play = button('Gioca', 'primary big pulse shine play', onPlay, { glyph: 'play', sfx: 'select' });
     const row = el('div', 'row');
     add(row,
+      button('Terre Spezzate 3D', 'gold', () => { location.href = '3d.html'; }, { glyph: 'castle', sfx: 'select' }),
       button('Nazione', '', onNation, { glyph: 'castle' }),
       button('Negozio', '', () => show('shop'), { glyph: 'bag' }),
       button('Bestiario', '', () => show('bestiary'), { glyph: 'paw' }),
