@@ -21,49 +21,187 @@
   S = Object.assign({ runes: 0, level: 1, vig: 10, end: 10, mnd: 10, str: 10, grace: 0, bosses: {}, flasks: 4, stain: null, essences: 0, found: { 0: true }, forms: { slime: true, human: true } }, S || {});
   const saveS = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } };
   const mythic = ch.cls === 'pierfrancesco';
+  const plugins = [];
+  const API = {};
+  const hook = (name, ...args) => { for (const pl of plugins) if (pl[name]) { try { pl[name](...args); } catch (err) { console.error('[plugin ' + (pl.id || '?') + '.' + name + ']', err); } } };
+  const chain = (name, v, ...args) => { for (const pl of plugins) if (pl[name]) { try { v = pl[name](v, ...args); } catch (err) { console.error(err); } } return v; };
   const CLS = {
     pierfrancesco: { hp: 3, st: 2, fp: 2, dmg: 3 }, guerriero: { hp: 1.3, st: 1.2, fp: 1, dmg: 1.1 },
     arcimago: { hp: 1, st: 1, fp: 1.6, dmg: 1.05 }, predatore: { hp: 1.1, st: 1.1, fp: 1.1, dmg: 1.1 }, evocatore: { hp: 1, st: 1, fp: 1.3, dmg: 1 },
   }[ch.cls] || { hp: 1, st: 1, fp: 1, dmg: 1 };
 
-  /* ------------------------------------------------------------ renderer */
+  /* ------------------------------------------------------------ renderer + post-processing */
   const quality = main.settings.quality || 'high';
-  const renderer = new T.WebGLRenderer({ antialias: quality === 'high', powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality === 'low' ? 1 : 1.5));
+  const renderer = new T.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  const isGL2 = renderer.capabilities.isWebGL2;
+  let pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'low' ? 1 : quality === 'medium' ? 1.25 : 1.6);
+  renderer.setPixelRatio(pixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = quality !== 'low';
   renderer.shadowMap.type = T.PCFSoftShadowMap;
+  renderer.toneMapping = T.ACESFilmicToneMapping; // only used when post-processing is off
   $('view').appendChild(renderer.domElement);
   const scene = new T.Scene();
-  const FOG = new T.Color('#b9a37a');
-  scene.fog = new T.Fog(FOG, 50, quality === 'low' ? 200 : 270);
-  const camera = new T.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1600);
-  window.addEventListener('resize', () => {
+  scene.fog = new T.Fog(new T.Color('#b9a37a'), 55, quality === 'low' ? 210 : 310);
+  const camera = new T.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2400);
+  const VS_FS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+  const POST = (() => {
+    const enabled = quality !== 'low';
+    const fsCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1), fsScene = new T.Scene();
+    const quad = new T.Mesh(new T.PlaneGeometry(2, 2)); quad.frustumCulled = false; fsScene.add(quad);
+    const type = isGL2 ? T.HalfFloatType : T.UnsignedByteType;
+    const mk = (w, h, ms) => new T.WebGLRenderTarget(Math.max(1, w), Math.max(1, h), { type, samples: ms || 0, minFilter: T.LinearFilter, magFilter: T.LinearFilter });
+    let rtMain = null, a = null, b = null, c = null, d = null;
+    const sm = (frag, uniforms) => new T.ShaderMaterial({ uniforms, vertexShader: VS_FS, fragmentShader: frag, depthTest: false, depthWrite: false });
+    const bright = sm('uniform sampler2D tex; uniform float thr; varying vec2 vUv; void main(){ vec3 c = texture2D(tex, vUv).rgb; float l = max(c.r, max(c.g, c.b)); gl_FragColor = vec4(c * smoothstep(thr, thr + 0.8, l), 1.0); }',
+      { tex: { value: null }, thr: { value: 0.9 } });
+    const blur = sm('uniform sampler2D tex; uniform vec2 dir; varying vec2 vUv; void main(){ vec3 s = texture2D(tex, vUv).rgb * 0.227;' +
+      's += (texture2D(tex, vUv + dir * 1.385).rgb + texture2D(tex, vUv - dir * 1.385).rgb) * 0.316;' +
+      's += (texture2D(tex, vUv + dir * 3.231).rgb + texture2D(tex, vUv - dir * 3.231).rgb) * 0.070; gl_FragColor = vec4(s, 1.0); }',
+      { tex: { value: null }, dir: { value: new T.Vector2() } });
+    const comp = sm(`uniform sampler2D tex, b1, b2; uniform float strength, exposure, vig, hurt, time, sat; uniform vec3 tint; varying vec2 vUv;
+      vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+      void main(){
+        vec3 c = texture2D(tex, vUv).rgb;
+        c += (texture2D(b1, vUv).rgb * 0.8 + texture2D(b2, vUv).rgb * 1.4) * strength;
+        c = aces(c * tint * exposure);
+        float l = dot(c, vec3(0.299, 0.587, 0.114)); c = mix(vec3(l), c, sat);
+        vec2 q = vUv - 0.5; c *= 1.0 - dot(q, q) * vig * 2.4;
+        c = mix(c, vec3(0.5, 0.0, 0.0), hurt * smoothstep(0.15, 0.8, length(q)));
+        c = pow(max(c, 0.0), vec3(1.0 / 2.2));
+        c += (fract(sin(dot(vUv * 913.0 + time, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+        gl_FragColor = vec4(c, 1.0); }`,
+      { tex: { value: null }, b1: { value: null }, b2: { value: null }, strength: { value: 0.6 }, exposure: { value: 1 }, vig: { value: 0.38 },
+        tint: { value: new T.Color(1, 1, 1) }, hurt: { value: 0 }, time: { value: 0 }, sat: { value: 1.1 } });
+    function size() {
+      if (!enabled) return;
+      const pr = renderer.getPixelRatio(), w = Math.floor(window.innerWidth * pr), h = Math.floor(window.innerHeight * pr);
+      [rtMain, a, b, c, d].forEach((r) => r && r.dispose());
+      rtMain = mk(w, h, isGL2 && quality === 'high' ? 4 : 0);
+      a = mk(w >> 2, h >> 2); b = mk(w >> 2, h >> 2); c = mk(w >> 3, h >> 3); d = mk(w >> 3, h >> 3);
+    }
+    function pass(mat, target) { quad.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
+    function render(t) {
+      if (!enabled) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
+      renderer.setRenderTarget(rtMain); renderer.render(scene, camera);
+      bright.uniforms.tex.value = rtMain.texture; pass(bright, a);
+      blur.uniforms.tex.value = a.texture; blur.uniforms.dir.value.set(1 / a.width, 0); pass(blur, b);
+      blur.uniforms.tex.value = b.texture; blur.uniforms.dir.value.set(0, 1 / a.height); pass(blur, a);
+      blur.uniforms.tex.value = a.texture; blur.uniforms.dir.value.set(1 / c.width, 0); pass(blur, c);
+      blur.uniforms.tex.value = c.texture; blur.uniforms.dir.value.set(0, 1 / c.height); pass(blur, d);
+      blur.uniforms.tex.value = d.texture; blur.uniforms.dir.value.set(2 / c.width, 0); pass(blur, c);
+      blur.uniforms.tex.value = c.texture; blur.uniforms.dir.value.set(0, 2 / c.height); pass(blur, d);
+      comp.uniforms.tex.value = rtMain.texture; comp.uniforms.b1.value = a.texture; comp.uniforms.b2.value = d.texture; comp.uniforms.time.value = t % 100;
+      pass(comp, null);
+    }
+    size();
+    return { render, size, comp, enabled };
+  })();
+  function onResize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
-  });
-
-  // sky dome with vertex-colour gradient
-  {
-    const g = new T.SphereGeometry(1400, 24, 12);
-    const cols = [], top = new T.Color('#5d6f9a'), mid = new T.Color('#e7c98f'), low = new T.Color('#b9a37a');
-    const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const h = p.getY(i) / 1400, c = h > 0.15 ? mid.clone().lerp(top, Math.min(1, (h - 0.15) / 0.6)) : low.clone().lerp(mid, clamp((h + 0.1) / 0.25, 0, 1));
-      cols.push(c.r, c.g, c.b);
-    }
-    g.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
-    scene.add(new T.Mesh(g, new T.MeshBasicMaterial({ vertexColors: true, side: T.BackSide, fog: false, depthWrite: false })));
+    POST.size(); partU.uScale.value = window.innerHeight * renderer.getPixelRatio() * 0.5;
   }
-  scene.add(new T.HemisphereLight('#ffe9c0', '#3a3020', 0.9));
-  const sun = new T.DirectionalLight('#ffd9a0', 1.6);
-  sun.position.set(60, 90, 40);
+  window.addEventListener('resize', () => setTimeout(onResize, 50));
+
+  /* ------------------------------------------------------------ sky, sun, moon, stars, day/night */
+  const skyU = { top: { value: new T.Color() }, horizon: { value: new T.Color() }, ground: { value: new T.Color('#2a2418') },
+    sunDir: { value: new T.Vector3(0, 1, 0) }, sunCol: { value: new T.Color() }, night: { value: 0 }, time: { value: 0 } };
+  const skyMat = new T.ShaderMaterial({ uniforms: skyU, side: T.BackSide, depthWrite: false, fog: false,
+    vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }',
+    fragmentShader: `uniform vec3 top, horizon, ground, sunCol, sunDir; uniform float night, time; varying vec3 vDir;
+      float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 45758.5); }
+      void main(){
+        vec3 d = normalize(vDir); float y = d.y;
+        vec3 c = y > 0.0 ? mix(horizon, top, pow(clamp(y, 0.0, 1.0), 0.5)) : mix(horizon, ground, clamp(-y * 5.0, 0.0, 1.0));
+        vec3 sd = normalize(sunDir); float s = max(dot(d, sd), 0.0);
+        c += sunCol * (pow(s, 1400.0) * 40.0 + pow(s, 16.0) * 0.5 + pow(s, 3.0) * 0.18) * smoothstep(-0.15, 0.05, sd.y);
+        if (night > 0.001) {
+          vec2 g = floor(vec2(atan(d.z, d.x) * 160.0, asin(clamp(y, -1.0, 1.0)) * 160.0));
+          float st = step(0.9965, h21(g)) * smoothstep(0.0, 0.25, y);
+          c += vec3(st) * night * (0.6 + 0.4 * sin(time * 2.0 + h21(g + 7.0) * 50.0)) * 2.5;
+          float m = max(dot(d, -sd), 0.0);
+          c += vec3(0.8, 0.88, 1.0) * (pow(m, 3000.0) * 12.0 + pow(m, 40.0) * 0.3) * night;
+          float band = exp(-pow(dot(d, normalize(vec3(0.3, 0.5, 0.8))) * 4.0, 2.0)) * smoothstep(0.0, 0.4, y);
+          c += vec3(0.25, 0.22, 0.45) * band * night * 0.35;
+        }
+        gl_FragColor = vec4(c, 1.0); }` });
+  const sky = new T.Mesh(new T.SphereGeometry(2000, 32, 16), skyMat);
+  sky.frustumCulled = false; sky.renderOrder = -10; scene.add(sky);
+  // drifting clouds
+  const cloudTex = (() => { const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d');
+    for (let i = 0; i < 14; i++) { const gx = 20 + Math.random() * 88, gy = 24 + Math.random() * 18, r = 12 + Math.random() * 18;
+      const g = x.createRadialGradient(gx, gy, 0, gx, gy, r); g.addColorStop(0, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 128, 64); }
+    return new T.CanvasTexture(c); })();
+  const clouds = [];
+  for (let i = 0; i < (quality === 'low' ? 10 : 22); i++) {
+    const s = new T.Sprite(new T.SpriteMaterial({ map: cloudTex, transparent: true, depthWrite: false, fog: false, opacity: 0.7 }));
+    const sc = 220 + Math.random() * 260; s.scale.set(sc, sc * 0.45, 1);
+    s.userData = { a: Math.random() * TAU, r: 500 + Math.random() * 900, h: 260 + Math.random() * 220, v: 0.004 + Math.random() * 0.006 };
+    clouds.push(s); scene.add(s);
+  }
+  const hemi = new T.HemisphereLight('#ffe9c0', '#3a3020', 1.0); scene.add(hemi);
+  const sun = new T.DirectionalLight('#ffd9a0', 2.4);
   sun.castShadow = renderer.shadowMap.enabled;
-  sun.shadow.mapSize.set(1024, 1024);
-  Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 250 });
+  sun.shadow.mapSize.set(quality === 'high' ? 2048 : 1024, quality === 'high' ? 2048 : 1024);
+  sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
+  Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 300 });
   scene.add(sun, sun.target);
-  const flashLight = new T.PointLight('#b388ff', 0, 30);
+  const flashLight = new T.PointLight('#b388ff', 0, 34, 1.6);
   scene.add(flashLight);
+  // environment reflections generated from the sky
+  const pmrem = new T.PMREMGenerator(renderer);
+  const envScene = new T.Scene(); envScene.add(new T.Mesh(new T.SphereGeometry(50, 24, 12), skyMat));
+  let envRT = null, envTimer = 0;
+  const DAY = { t: 0.32, len: 600 };
+  const C = (h) => new T.Color(h);
+  const SKYPAL = {
+    dayTop: C('#4a78bd'), dayHor: C('#ead6a6'), duskTop: C('#2f3770'), duskHor: C('#ff8c4a'), nightTop: C('#03050f'), nightHor: C('#141c36'),
+    sunDay: C('#fff1d0'), sunDusk: C('#ff9a50'),
+  };
+  const regionFog = new T.Color('#b9a37a');
+  const tmpA = new T.Color(), tmpB = new T.Color(), sunV = new T.Vector3();
+  const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  let nightAmt = 0;
+  function updateDay(dt, cx, cy, cz) {
+    DAY.t = (DAY.t + dt / DAY.len) % 1;
+    const ang = DAY.t * TAU;
+    sunV.set(Math.cos(ang) * 0.75, Math.sin(ang), 0.35 + Math.cos(ang) * 0.15).normalize();
+    const el = sunV.y, day = sstep(-0.1, 0.3, el), dusk = clamp(1 - Math.abs(el - 0.04) / 0.22, 0, 1);
+    nightAmt = 1 - sstep(-0.22, 0.02, el);
+    tmpA.copy(SKYPAL.nightTop).lerp(SKYPAL.dayTop, day).lerp(SKYPAL.duskTop, dusk * 0.6);
+    tmpB.copy(SKYPAL.nightHor).lerp(SKYPAL.dayHor, day).lerp(SKYPAL.duskHor, dusk * 0.75);
+    skyU.top.value.copy(tmpA); skyU.horizon.value.copy(tmpB);
+    skyU.sunDir.value.copy(sunV); skyU.sunCol.value.copy(SKYPAL.sunDay).lerp(SKYPAL.sunDusk, dusk);
+    skyU.night.value = nightAmt; skyU.time.value += dt;
+    // fog = horizon tinted by region
+    scene.fog.color.copy(tmpB).lerp(regionFog, 0.45 * (0.3 + day * 0.7)).multiplyScalar(0.55 + day * 0.45);
+    // sun by day, moon by night
+    if (el > -0.05) {
+      sun.position.set(cx + sunV.x * 120, cy + Math.max(0.15, sunV.y) * 120, cz + sunV.z * 120);
+      sun.color.copy(SKYPAL.sunDay).lerp(SKYPAL.sunDusk, dusk); sun.intensity = 0.35 + 1.9 * day;
+    } else {
+      sun.position.set(cx - sunV.x * 120, cy - sunV.y * 120, cz - sunV.z * 120);
+      sun.color.set('#9db7ff'); sun.intensity = 0.55 * nightAmt;
+    }
+    sun.target.position.set(cx, cy, cz);
+    hemi.intensity = 0.25 + 0.5 * day; hemi.color.copy(tmpB).lerp(C('#ffffff'), 0.3); hemi.groundColor.set(nightAmt > 0.5 ? '#141820' : '#3a3020');
+    POST.comp.uniforms.tint.value.setRGB(1 - nightAmt * 0.25, 1 - nightAmt * 0.12, 1 + nightAmt * 0.1);
+    POST.comp.uniforms.exposure.value = 0.88 + nightAmt * 0.4;
+    sky.position.set(cx, cy, cz);
+    for (const s of clouds) {
+      const u = s.userData; u.a += u.v * dt * 0.05;
+      s.position.set(cx + Math.cos(u.a) * u.r, u.h, cz + Math.sin(u.a) * u.r);
+      s.material.color.copy(tmpB).lerp(C('#ffffff'), day * 0.5).multiplyScalar(0.4 + day * 0.9);
+    }
+    envTimer -= dt;
+    if (quality !== 'low' && envTimer <= 0) {
+      envTimer = quality === 'high' ? 8 : 20;
+      if (envRT) envRT.dispose();
+      envRT = pmrem.fromScene(envScene, 0, 0.1, 200);
+      scene.environment = envRT.texture;
+    }
+  }
 
   /* ------------------------------------------------------------ terrain */
   function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -116,20 +254,48 @@
   FLAT.push({ x: LOC.dragon.x, z: LOC.dragon.z, r: 30, h: rawH(LOC.dragon.x, LOC.dragon.z) - 1 });
   FLAT.push({ x: LOC.camp.x, z: LOC.camp.z, r: 12, h: rawH(LOC.camp.x, LOC.camp.z) });
   for (const c of LOC.camps) FLAT.push({ x: c.x, z: c.z, r: 10, h: rawH(c.x, c.z) });
+  // wind (shared by trees and grass)
+  const windU = { uTime: { value: 0 }, uPlayer: { value: new T.Vector3() } };
+  function sway(mat, amount, grass) {
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = windU.uTime; sh.uniforms.uPlayer = windU.uPlayer;
+      sh.vertexShader = 'uniform float uTime; uniform vec3 uPlayer;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vec4 ip = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        #else
+          vec4 ip = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        #endif
+        float hw = ${grass ? 'position.y * position.y' : 'max(position.y + 1.2, 0.0) * 0.45'};
+        float ph = uTime * ${grass ? '2.4' : '1.0'} + ip.x * 0.13 + ip.z * 0.09;
+        float gust = 0.6 + 0.4 * sin(uTime * 0.35 + ip.x * 0.01);
+        ${grass ? 'float fd = length(ip.xz - uPlayer.xz); transformed *= clamp((36.0 - fd) / 9.0, 0.0, 1.0);' : ''}
+        transformed.x += sin(ph) * ${amount.toFixed(3)} * hw * gust;
+        transformed.z += cos(ph * 0.83) * ${(amount * 0.6).toFixed(3)} * hw * gust;
+        ${grass && isGL2 ? `vec2 pd = ip.xz - uPlayer.xz; float pk = clamp(1.0 - length(pd) / 1.7, 0.0, 1.0);
+        vec3 pl = transpose(mat3(instanceMatrix)) * vec3(pd.x, 0.0, pd.y);
+        transformed.xz += normalize(pl.xz + vec2(0.0001)) * pk * hw * 0.8; transformed.y -= pk * hw * 0.35;` : ''}
+      `);
+    };
+    mat.customProgramCacheKey = () => 'sway' + amount + (grass ? 'g' : 't');
+    return mat;
+  }
+  const hdr = (hex, k) => new T.Color(hex).multiplyScalar(k);
   {
-    const seg = quality === 'low' ? 170 : 240;
+    const seg = quality === 'low' ? 170 : 250;
     const g = new T.PlaneGeometry(MAPR * 2.3, MAPR * 2.3, seg, seg);
     g.rotateX(-Math.PI / 2);
     const p = g.attributes.position, cols = [];
-    const grass = new T.Color('#7d8a3c'), gold = new T.Color('#b59a4a'), rock = new T.Color('#7a7064'), dirt = new T.Color('#6e5a3a');
+    const rock = new T.Color('#7a7064'), dirt = new T.Color('#6e5a3a'), snow = new T.Color('#eef3f8');
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), z = p.getZ(i), h = heightAt(x, z);
       p.setY(i, h);
-      const n = vnoise(x * 0.05, z * 0.05);
-      const R = REGIONS[regionAt(x + (vnoise(x * 0.02, z * 0.02) - 0.5) * 100, z + (vnoise(z * 0.02, x * 0.02) - 0.5) * 100)];
-      let c = new T.Color(R.ground[0]).lerp(new T.Color(R.ground[1]), n);
-      if (h > 9) c.lerp(rock, clamp((h - 9) / 8, 0, 1));
-      if (n < 0.25) c.lerp(dirt, 0.5);
+      const n = vnoise(x * 0.05, z * 0.05), n2 = vnoise(x * 0.31, z * 0.31);
+      const rk = regionAt(x + (vnoise(x * 0.02, z * 0.02) - 0.5) * 100, z + (vnoise(z * 0.02, x * 0.02) - 0.5) * 100), R = REGIONS[rk];
+      const c = new T.Color(R.ground[0]).lerp(new T.Color(R.ground[1]), n);
+      c.multiplyScalar(0.88 + n2 * 0.24);
+      if (h > 9) c.lerp(rk === 'north' ? snow : rock, clamp((h - 9) / 10, 0, 1));
+      if (rk === 'north' && h > 22) c.lerp(snow, 0.8);
+      if (n < 0.25 && rk !== 'north') c.lerp(dirt, 0.45);
       cols.push(c.r, c.g, c.b);
     }
     g.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
@@ -137,15 +303,20 @@
     const m = new T.Mesh(g, new T.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
     m.receiveShadow = true;
     scene.add(m);
-    // lake by the dragon
-    const lake = new T.Mesh(new T.CircleGeometry(26, 32), new T.MeshLambertMaterial({ color: '#3d6f86', transparent: true, opacity: 0.8 }));
-    lake.rotation.x = -Math.PI / 2; lake.position.set(LOC.dragon.x - 30, heightAt(LOC.dragon.x - 30, LOC.dragon.z) + 0.15, LOC.dragon.z + 10);
-    scene.add(lake);
+    // water: storm lake (north) and swamp pools (west), reflecting the sky
+    const water = (x, z, r, col) => {
+      const w = new T.Mesh(new T.CircleGeometry(r, 40), new T.MeshStandardMaterial({ color: col, roughness: 0.06, metalness: 0.45, transparent: true, opacity: 0.86, envMapIntensity: 1.4 }));
+      w.rotation.x = -Math.PI / 2; w.position.set(x, heightAt(x, z) + 0.18, z); w.receiveShadow = true; scene.add(w);
+      return w;
+    };
+    water(LOC.dragon.x - 34, LOC.dragon.z + 12, 26, '#2a5f7c');
+    for (let i = 0; i < 9; i++) { const x = -330 - Math.random() * 300, z = -150 + Math.random() * 420; if (Math.hypot(x, z) < MAPR - 40) water(x, z, 7 + Math.random() * 12, '#2c3b2a'); }
   }
 
   /* ------------------------------------------------------------ props */
   const COLL = []; // static circle colliders {x,z,r}
   const lam = (c, o) => new T.MeshLambertMaterial(Object.assign({ color: c, flatShading: true }, o || {}));
+  const std = (c, rough, metal, o) => new T.MeshStandardMaterial(Object.assign({ color: c, roughness: rough == null ? 0.7 : rough, metalness: metal || 0, flatShading: true }, o || {}));
   function scatter(n, fn) {
     let placed = 0, tries = 0;
     while (placed < n && tries++ < n * 20) {
@@ -157,88 +328,184 @@
       if (!bad && fn(x, z)) placed++;
     }
   }
-  function instanced(geo, mat, list) {
+  function instanced(geo, mat, list, shadow) {
+    if (!list.length) return null;
     const im = new T.InstancedMesh(geo, mat, list.length);
-    const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler();
+    const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), v = new T.Vector3(), sc = new T.Vector3();
     list.forEach((it, i) => {
       e.set(it.rx || 0, it.ry || 0, it.rz || 0); q.setFromEuler(e);
-      m4.compose(new T.Vector3(it.x, it.y, it.z), q, new T.Vector3(it.sx, it.sy, it.sz));
+      m4.compose(v.set(it.x, it.y, it.z), q, sc.set(it.sx, it.sy, it.sz));
       im.setMatrixAt(i, m4);
       if (it.c) im.setColorAt(i, new T.Color(it.c));
     });
-    im.castShadow = true; im.receiveShadow = true;
+    im.castShadow = shadow !== false; im.receiveShadow = true;
     scene.add(im);
     return im;
   }
   {
-    const trunks = [], crowns = [], rocks = [];
-    scatter(quality === 'low' ? 600 : 1100, (x, z) => {
-      const y = heightAt(x, z), s = rand(0.8, 1.6);
-      trunks.push({ x, y: y + 2.2 * s, z, sx: s, sy: s, sz: s, ry: rand(0, 6) });
-      crowns.push({ x, y: y + 5.2 * s, z, sx: s * rand(0.9, 1.3), sy: s * rand(0.8, 1.2), sz: s * rand(0.9, 1.3), ry: rand(0, 6), c: ((cs) => cs[(Math.random() * cs.length) | 0])(REGIONS[regionAt(x, z)].crowns) });
+    const L = { trunk: [], round: [], pine: [], pineSnow: [], dead: [], branch: [], willow: [], shroom: [], rocks: [], lava: [], crystal: [] };
+    const pick = (cs) => cs[(Math.random() * cs.length) | 0];
+    scatter(quality === 'low' ? 650 : 1250, (x, z) => {
+      const y = heightAt(x, z), s = rand(0.8, 1.7), rk = regionAt(x, z), ry = rand(0, TAU);
+      if (rk === 'north') {
+        L.trunk.push({ x, y: y + 1.6 * s, z, sx: s * 0.8, sy: s * 0.75, sz: s * 0.8, ry });
+        for (let k = 0; k < 3; k++) L.pine.push({ x, y: y + (3.2 + k * 1.9) * s, z, sx: s * (1.25 - k * 0.3), sy: s * 1.1, sz: s * (1.25 - k * 0.3), ry: ry + k, c: pick(['#24432f', '#2d4f36', '#1f3b2a']) });
+        L.pineSnow.push({ x, y: y + 7.6 * s, z, sx: s * 0.42, sy: s * 0.5, sz: s * 0.42, ry });
+      } else if (rk === 'east') {
+        const tilt = rand(-0.25, 0.25);
+        L.dead.push({ x, y: y + 2.2 * s, z, sx: s * 0.8, sy: s, sz: s * 0.8, rz: tilt, ry });
+        for (let k = 0; k < 3; k++) L.branch.push({ x: x + Math.cos(ry + k * 2.1) * 0.7 * s, y: y + (3 + k * 0.7) * s, z: z + Math.sin(ry + k * 2.1) * 0.7 * s, sx: s * 0.5, sy: s * 0.6, sz: s * 0.5, rz: 0.9 * (k % 2 ? 1 : -1), ry: ry + k * 2.1 });
+        if (Math.random() < 0.3) L.round.push({ x, y: y + 5 * s, z, sx: s * 0.8, sy: s * 0.7, sz: s * 0.8, ry, c: pick(REGIONS.east.crowns) });
+      } else if (rk === 'west') {
+        L.trunk.push({ x, y: y + 2 * s, z, sx: s * 1.1, sy: s * 0.95, sz: s * 1.1, ry });
+        L.willow.push({ x, y: y + 4.8 * s, z, sx: s * 1.5, sy: s * 0.7, sz: s * 1.5, ry, c: pick(REGIONS.west.crowns) });
+        if (Math.random() < 0.7) for (let k = 0; k < 3; k++) L.shroom.push({ x: x + rand(-2.5, 2.5), y: y + 0.25, z: z + rand(-2.5, 2.5), sx: rand(0.2, 0.45), sy: rand(0.2, 0.4), sz: rand(0.2, 0.45), c: pick(['#7cf7ff', '#b6ff6a', '#e48bff']) });
+      } else {
+        L.trunk.push({ x, y: y + 2.2 * s, z, sx: s, sy: s, sz: s, ry });
+        L.round.push({ x, y: y + 5.2 * s, z, sx: s * rand(0.9, 1.3), sy: s * rand(0.8, 1.15), sz: s * rand(0.9, 1.3), ry, c: pick(REGIONS.center.crowns) });
+        if (Math.random() < 0.6) L.round.push({ x: x + rand(-1.4, 1.4), y: y + 6.6 * s, z: z + rand(-1.4, 1.4), sx: s * 0.7, sy: s * 0.65, sz: s * 0.7, ry: ry + 1, c: pick(REGIONS.center.crowns) });
+      }
       COLL.push({ x, z, r: 0.7 * s });
       return true;
     });
-    scatter(quality === 'low' ? 350 : 650, (x, z) => {
-      const s = rand(0.6, 2.6);
-      rocks.push({ x, y: heightAt(x, z) + s * 0.4, z, sx: s, sy: s * rand(0.6, 1.1), sz: s * rand(0.8, 1.3), rx: rand(0, 1), ry: rand(0, 6) });
+    scatter(quality === 'low' ? 380 : 700, (x, z) => {
+      const s = rand(0.6, 2.8), rk = regionAt(x, z);
+      L.rocks.push({ x, y: heightAt(x, z) + s * 0.35, z, sx: s, sy: s * rand(0.55, 1.05), sz: s * rand(0.8, 1.3), rx: rand(0, 1), ry: rand(0, 6),
+        c: rk === 'east' ? pick(['#4a3a36', '#3b2f2c']) : rk === 'north' ? pick(['#9aa3ad', '#c8d0d8']) : rk === 'west' ? pick(['#4f5446', '#5a5a4e']) : pick(['#8b8274', '#9c9282', '#7a7266']) });
       COLL.push({ x, z, r: s * 0.9 });
       return true;
     });
-    instanced(new T.CylinderGeometry(0.28, 0.45, 4.4, 6), lam('#5a4330'), trunks);
-    instanced(new T.IcosahedronGeometry(2.6, 0), lam('#ffffff'), crowns);
-    instanced(new T.DodecahedronGeometry(1, 0), lam('#837a6e'), rocks);
+    // glowing lava fissures (east) and ice crystals (north)
+    scatter(quality === 'low' ? 60 : 120, (x, z) => {
+      const rk = regionAt(x, z);
+      if (rk === 'east') { L.lava.push({ x, y: heightAt(x, z) + 0.05, z, sx: rand(0.3, 0.7), sy: 0.12, sz: rand(5, 14), ry: rand(0, TAU) }); return true; }
+      if (rk === 'north') { L.crystal.push({ x, y: heightAt(x, z) + 1, z, sx: rand(0.5, 1), sy: rand(1.4, 3), sz: rand(0.5, 1), rx: rand(-0.3, 0.3), ry: rand(0, TAU) }); return true; }
+      return false;
+    });
+    const crownGeo = new T.IcosahedronGeometry(2.6, 1);
+    instanced(new T.CylinderGeometry(0.26, 0.48, 4.4, 7), lam('#5a4330'), L.trunk);
+    instanced(crownGeo, sway(lam('#ffffff'), 0.22), L.round);
+    instanced(new T.ConeGeometry(2.2, 3.2, 8), sway(lam('#ffffff'), 0.12), L.pine);
+    instanced(new T.ConeGeometry(2.2, 2.2, 8), lam('#f4f8fc'), L.pineSnow, false);
+    instanced(new T.CylinderGeometry(0.18, 0.42, 4.4, 6), lam('#3a2a24'), L.dead);
+    instanced(new T.CylinderGeometry(0.06, 0.14, 2.2, 5), lam('#3a2a24'), L.branch, false);
+    instanced(new T.SphereGeometry(2.4, 10, 6), sway(lam('#ffffff'), 0.3), L.willow);
+    instanced(new T.SphereGeometry(1, 8, 5, 0, TAU, 0, Math.PI / 2), new T.MeshBasicMaterial({ color: new T.Color(2.2, 2.2, 2.2) }), L.shroom, false);
+    instanced(new T.DodecahedronGeometry(1, 0), lam('#ffffff'), L.rocks);
+    instanced(new T.BoxGeometry(1, 1, 1), new T.MeshBasicMaterial({ color: hdr('#ff6a1a', 3.2) }), L.lava, false);
+    instanced(new T.OctahedronGeometry(1, 0), std('#9fdcff', 0.1, 0.2, { transparent: true, opacity: 0.85, emissive: hdr('#4fb3ff', 0.6) }), L.crystal);
   }
-  // ruins: broken pillars and arches
-  const stone = lam('#a59c88');
+  // ruins: broken pillars, arches and statues
+  const stone = std('#a59c88', 0.9, 0);
   function pillar(x, z, h, broken) {
     const y = heightAt(x, z);
-    const m = new T.Mesh(new T.CylinderGeometry(0.7, 0.8, h, 8), stone);
+    const m = new T.Mesh(new T.CylinderGeometry(0.7, 0.8, h, 10), stone);
     m.position.set(x, y + h / 2, z); m.castShadow = m.receiveShadow = true;
     if (broken) m.rotation.z = rand(-0.08, 0.08);
+    const cap = new T.Mesh(new T.BoxGeometry(1.9, 0.4, 1.9), stone); cap.position.y = h / 2 + 0.2; cap.castShadow = true;
+    if (!broken || Math.random() < 0.5) m.add(cap);
     scene.add(m); COLL.push({ x, z, r: 0.9 });
   }
   for (let i = 0; i < 10; i++) { const a = (i / 10) * TAU; pillar(LOC.ruins.x + Math.cos(a) * 12, LOC.ruins.z + Math.sin(a) * 12, rand(3, 8), true); }
-  for (let i = 0; i < 16; i++) { const a = (i / 16) * TAU; pillar(LOC.arena.x + Math.cos(a) * (LOC.arena.r + 1.5), LOC.arena.z + Math.sin(a) * (LOC.arena.r + 1.5), i % 3 ? 9 : 5, false); }
+  for (let i = 0; i < 16; i++) { const a = (i / 16) * TAU; pillar(LOC.arena.x + Math.cos(a) * (LOC.arena.r + 1.5), LOC.arena.z + Math.sin(a) * (LOC.arena.r + 1.5), i % 3 ? 10 : 6, false); }
+  {
+    // arena floor tiles and braziers
+    const fl = new T.Mesh(new T.CylinderGeometry(LOC.arena.r, LOC.arena.r, 0.3, 32), std('#6d6458', 0.85));
+    fl.position.set(LOC.arena.x, heightAt(LOC.arena.x, LOC.arena.z) + 0.05, LOC.arena.z); fl.receiveShadow = true; scene.add(fl);
+  }
   // golden giant tree on the horizon
   {
-    const g = new T.Group(), gold = new T.MeshBasicMaterial({ color: '#ffd36b', fog: false, transparent: true, opacity: 0.92 });
-    const trunk = new T.MeshBasicMaterial({ color: '#e0a640', fog: false });
+    const g = new T.Group(), gold = new T.MeshBasicMaterial({ color: hdr('#ffcf5a', 1.7), fog: false, transparent: true, opacity: 0.93 });
+    const trunk = new T.MeshBasicMaterial({ color: hdr('#e0a640', 1.2), fog: false });
     for (let i = 0; i < 6; i++) {
       const c = new T.Mesh(new T.CylinderGeometry(8 - i, 10 - i, 40, 7), trunk);
       c.position.set(Math.sin(i) * 3, 20 + i * 36, Math.cos(i) * 3); c.rotation.z = Math.sin(i * 1.7) * 0.15; g.add(c);
     }
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 30; i++) {
       const l = new T.Mesh(new T.IcosahedronGeometry(rand(24, 46), 0), gold);
-      const a = rand(0, TAU), r = rand(10, 90);
-      l.position.set(Math.cos(a) * r, rand(160, 280), Math.sin(a) * r * 0.6); g.add(l);
+      const a = rand(0, TAU), r = rand(10, 95);
+      l.position.set(Math.cos(a) * r, rand(160, 290), Math.sin(a) * r * 0.6); g.add(l);
     }
-    g.position.set(-60, -30, -620);
+    const halo = new T.Sprite(new T.SpriteMaterial({ map: null, color: hdr('#ffd36b', 0.5), transparent: true, opacity: 0.25, depthWrite: false, fog: false, blending: T.AdditiveBlending }));
+    halo.scale.set(520, 420, 1); halo.position.set(0, 220, 0); g.add(halo);
+    g.position.set(-60, -30, -900);
     scene.add(g);
   }
 
-  /* ------------------------------------------------------------ particles */
-  const PMAX = 700;
-  const pPos = new Float32Array(PMAX * 3), pCol = new Float32Array(PMAX * 3), parts = [];
+  /* ------------------------------------------------------------ grass (chunked around the player, wind + bending) */
+  const GRASS = { size: 34, per: quality === 'high' ? 2600 : 1500, ring: 1, chunks: new Map(), pool: [] };
+  const grassGeo = (() => {
+    const g = new T.BufferGeometry(), w = 0.07;
+    g.setAttribute('position', new T.Float32BufferAttribute([-w, 0, 0, w, 0, 0, -w * 0.6, 0.55, 0.02, w * 0.6, 0.55, 0.02, 0, 1, 0.08], 3));
+    g.setAttribute('color', new T.Float32BufferAttribute([0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 1.15, 1.15, 1.15], 3));
+    g.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4]);
+    g.setAttribute('normal', new T.Float32BufferAttribute([0, 1, 0.3, 0, 1, 0.3, 0, 1, 0.3, 0, 1, 0.3, 0, 1, 0.3], 3)); // lit like the ground
+    return g;
+  })();
+  const grassMat = sway(new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide }), 0.35, true);
+  const GCOL = { center: ['#7f8f3c', '#a8923f', '#6a8434', '#bfa660'], north: ['#8e9c80', '#a7b39a'], east: ['#8a4a2e', '#a8642f', '#6e3a26'], west: ['#3f5a32', '#4f4a5e', '#2f4a2a'] };
+  function buildChunk(cx, cz) {
+    const im = GRASS.pool.pop() || new T.InstancedMesh(grassGeo, grassMat, GRASS.per);
+    im.receiveShadow = true; im.frustumCulled = false;
+    const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), v = new T.Vector3(), sc = new T.Vector3(), col = new T.Color();
+    let n = 0;
+    for (let i = 0; i < GRASS.per; i++) {
+      const x = (cx + Math.random()) * GRASS.size, z = (cz + Math.random()) * GRASS.size;
+      const rk = regionAt(x, z), h = heightAt(x, z);
+      if (Math.hypot(x, z) > MAPR - 25 || h > 26 || (rk === 'north' && Math.random() < 0.93) || (rk === 'east' && Math.random() < 0.5)) continue;
+      if (Math.hypot(x - LOC.arena.x, z - LOC.arena.z) < LOC.arena.r + 1) continue;
+      const s = rand(0.32, 0.75) * (rk === 'west' ? 1.4 : 1);
+      e.set(rand(-0.15, 0.15), rand(0, TAU), rand(-0.15, 0.15)); q.setFromEuler(e);
+      m4.compose(v.set(x, h, z), q, sc.set(s * rand(0.8, 1.4), s * rand(0.8, 1.3), s));
+      im.setMatrixAt(n, m4);
+      col.set(GCOL[rk][(Math.random() * GCOL[rk].length) | 0]).multiplyScalar(rand(0.85, 1.12));
+      im.setColorAt(n, col); n++;
+    }
+    im.count = n; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    scene.add(im);
+    return im;
+  }
+  function updateGrass(px, pz) {
+    if (quality === 'low') return;
+    const cx = Math.floor(px / GRASS.size), cz = Math.floor(pz / GRASS.size), want = new Set();
+    for (let i = -GRASS.ring; i <= GRASS.ring; i++) for (let j = -GRASS.ring; j <= GRASS.ring; j++) want.add((cx + i) + ',' + (cz + j));
+    for (const [k, im] of GRASS.chunks) if (!want.has(k)) { scene.remove(im); GRASS.pool.push(im); GRASS.chunks.delete(k); }
+    let built = 0;
+    for (const k of want) if (!GRASS.chunks.has(k) && built < 1) { const [a, b] = k.split(',').map(Number); GRASS.chunks.set(k, buildChunk(a, b)); built++; }
+  }
+
+  /* ------------------------------------------------------------ particles (HDR, per-particle size) */
+  const PMAX = 1400;
+  const pPos = new Float32Array(PMAX * 3), pCol = new Float32Array(PMAX * 3), pSize = new Float32Array(PMAX), parts = [];
   const pGeo = new T.BufferGeometry();
   pGeo.setAttribute('position', new T.BufferAttribute(pPos, 3));
   pGeo.setAttribute('color', new T.BufferAttribute(pCol, 3));
-  const dot = (() => { const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d');
-    const gr = x.createRadialGradient(16, 16, 0, 16, 16, 16); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
-    x.fillStyle = gr; x.fillRect(0, 0, 32, 32); return new T.CanvasTexture(c); })();
-  const pts = new T.Points(pGeo, new T.PointsMaterial({ size: 0.6, map: dot, vertexColors: true, transparent: true, depthWrite: false, blending: T.AdditiveBlending }));
+  pGeo.setAttribute('size', new T.BufferAttribute(pSize, 1));
+  const partU = { uScale: { value: window.innerHeight * renderer.getPixelRatio() * 0.5 } };
+  const PVS = 'attribute float size; attribute vec3 color; varying vec3 vC; uniform float uScale; void main(){ vC = color; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(size * uScale / -mv.z, 0.0, 96.0); gl_Position = projectionMatrix * mv; }';
+  const pointMat = (additive) => new T.ShaderMaterial({ uniforms: partU, vertexShader: PVS, transparent: true, depthWrite: false,
+    blending: additive ? T.AdditiveBlending : T.NormalBlending,
+    fragmentShader: additive
+      ? 'varying vec3 vC; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); gl_FragColor = vec4(vC * a * a * 1.6, 1.0); }'
+      : 'varying vec3 vC; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.2, d); gl_FragColor = vec4(vC, a * 0.9); }' });
+  const pts = new T.Points(pGeo, pointMat(true));
   pts.frustumCulled = false;
   scene.add(pts);
+  const dot = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new T.CanvasTexture(c); })();
   const tmpC = new T.Color();
   function emit(x, y, z, n, color, o) {
     o = o || {};
     tmpC.set(color);
+    const k = o.bright || 1.6;
+    if (quality === 'low') n = Math.ceil(n * 0.5);
     for (let i = 0; i < n; i++) {
       if (parts.length >= PMAX) parts.shift();
       const sp = o.speed || 6;
+      const life = rand(0.4, 1) * (o.life || 1);
       parts.push({ x, y, z, vx: rand(-1, 1) * sp, vy: rand(o.up ? 0.5 : -1, 1) * sp + (o.up || 0), vz: rand(-1, 1) * sp,
-        life: rand(0.4, 1) * (o.life || 1), max: 0, r: tmpC.r, g: tmpC.g, b: tmpC.b, grav: o.grav == null ? 9 : o.grav });
-      parts[parts.length - 1].max = parts[parts.length - 1].life;
+        life, max: life, r: tmpC.r * k, g: tmpC.g * k, b: tmpC.b * k, grav: o.grav == null ? 9 : o.grav, size: (o.size || 0.45) * rand(0.6, 1.4) });
     }
   }
   function updateParticles(dt) {
@@ -246,26 +513,73 @@
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
       p.life -= dt;
-      if (p.life <= 0) { parts.splice(i, 1); continue; }
+      if (p.life <= 0) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
       p.vy -= p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      p.vx *= 0.97; p.vz *= 0.97;
+      const dr = Math.max(0, 1 - dt * 2); p.vx *= dr; p.vz *= dr;
     }
     for (const p of parts) {
       const k = p.life / p.max;
       pPos[n * 3] = p.x; pPos[n * 3 + 1] = p.y; pPos[n * 3 + 2] = p.z;
       pCol[n * 3] = p.r * k; pCol[n * 3 + 1] = p.g * k; pCol[n * 3 + 2] = p.b * k;
+      pSize[n] = p.size * (0.4 + 0.6 * k);
       n++;
     }
     pGeo.setDrawRange(0, n);
-    pGeo.attributes.position.needsUpdate = true; pGeo.attributes.color.needsUpdate = true;
+    pGeo.attributes.position.needsUpdate = true; pGeo.attributes.color.needsUpdate = true; pGeo.attributes.size.needsUpdate = true;
+  }
+  /* weather around the camera: leaves, snow, embers, spores, fireflies */
+  const WMAX = quality === 'low' ? 160 : quality === 'medium' ? 320 : 520;
+  const wPos = new Float32Array(WMAX * 3), wCol = new Float32Array(WMAX * 3), wSize = new Float32Array(WMAX), wData = [];
+  const wGeo = new T.BufferGeometry();
+  wGeo.setAttribute('position', new T.BufferAttribute(wPos, 3)); wGeo.setAttribute('color', new T.BufferAttribute(wCol, 3)); wGeo.setAttribute('size', new T.BufferAttribute(wSize, 1));
+  const wSoft = new T.Points(wGeo, pointMat(false)); wSoft.frustumCulled = false; scene.add(wSoft);
+  const glowGeo = new T.BufferGeometry(), gPos = new Float32Array(160 * 3), gCol = new Float32Array(160 * 3), gSize = new Float32Array(160), gData = [];
+  glowGeo.setAttribute('position', new T.BufferAttribute(gPos, 3)); glowGeo.setAttribute('color', new T.BufferAttribute(gCol, 3)); glowGeo.setAttribute('size', new T.BufferAttribute(gSize, 1));
+  const wGlow = new T.Points(glowGeo, pointMat(true)); wGlow.frustumCulled = false; scene.add(wGlow);
+  for (let i = 0; i < WMAX; i++) wData.push({ x: 0, y: -999, z: 0, ph: Math.random() * TAU, sp: rand(0.6, 1.4) });
+  for (let i = 0; i < 160; i++) gData.push({ x: 0, y: -999, z: 0, ph: Math.random() * TAU, sp: rand(0.6, 1.4) });
+  const WEATHER = {
+    center: { soft: ['#d9a441', '#c77a2c', '#e8c35a'], fall: 1.1, size: 0.22, glowDay: null, glowNight: '#ffe27a' },
+    north: { soft: ['#ffffff', '#eaf2ff'], fall: 2.2, size: 0.16, glowDay: null, glowNight: '#bfe3ff' },
+    east: { soft: ['#5a4038', '#3b302c'], fall: 0.7, size: 0.18, glowDay: '#ff7a2a', glowNight: '#ff7a2a', rise: true },
+    west: { soft: ['#9aa68a', '#7a8a6a'], fall: 0.25, size: 0.12, glowDay: '#b6ff6a', glowNight: '#9dff7a' },
+  };
+  function updateWeather(dt, cx, cy, cz, rk) {
+    const W = WEATHER[rk], R = 40, time = skyU.time.value;
+    for (let i = 0; i < WMAX; i++) {
+      const p = wData[i];
+      if (p.y < cy - 8 || p.y > cy + 30 || Math.abs(p.x - cx) > R || Math.abs(p.z - cz) > R || p.rk !== rk) {
+        p.x = cx + rand(-R, R); p.z = cz + rand(-R, R); p.y = p.rk === rk ? cy + rand(15, 28) : cy + rand(-6, 26); p.rk = rk;
+        tmpC.set(W.soft[(Math.random() * W.soft.length) | 0]); p.r = tmpC.r; p.g = tmpC.g; p.b = tmpC.b;
+      }
+      p.y -= W.fall * p.sp * dt; p.ph += dt * 2;
+      p.x += (Math.sin(p.ph) * 0.8 + 0.6) * dt * (rk === 'north' ? 1.5 : 1); p.z += Math.cos(p.ph * 0.7) * 0.5 * dt;
+      wPos[i * 3] = p.x; wPos[i * 3 + 1] = p.y; wPos[i * 3 + 2] = p.z;
+      const lit = 0.35 + 0.65 * (1 - nightAmt);
+      wCol[i * 3] = p.r * lit; wCol[i * 3 + 1] = p.g * lit; wCol[i * 3 + 2] = p.b * lit; wSize[i] = W.size * p.sp;
+    }
+    const gc = nightAmt > 0.4 ? W.glowNight : W.glowDay, gn = gc ? (W.rise ? 160 : Math.round(160 * (nightAmt > 0.4 ? 1 : 0.4))) : 0;
+    if (gc) tmpC.set(gc);
+    for (let i = 0; i < 160; i++) {
+      const p = gData[i];
+      if (i >= gn) { gPos[i * 3 + 1] = -9999; continue; }
+      if (Math.abs(p.x - cx) > 30 || Math.abs(p.z - cz) > 30 || p.y > cy + 18 || p.y < cy - 6) { p.x = cx + rand(-30, 30); p.z = cz + rand(-30, 30); p.y = heightAt(p.x, p.z) + rand(0.3, W.rise ? 1 : 4); }
+      p.ph += dt * p.sp;
+      if (W.rise) p.y += dt * 1.8 * p.sp; else { p.x += Math.sin(p.ph) * dt * 0.8; p.y += Math.sin(p.ph * 1.3) * dt * 0.4; p.z += Math.cos(p.ph * 0.9) * dt * 0.8; }
+      const tw = W.rise ? 1 : 0.4 + 0.6 * Math.abs(Math.sin(time * 2 + p.ph * 3));
+      gPos[i * 3] = p.x; gPos[i * 3 + 1] = p.y; gPos[i * 3 + 2] = p.z;
+      gCol[i * 3] = tmpC.r * 2.5 * tw; gCol[i * 3 + 1] = tmpC.g * 2.5 * tw; gCol[i * 3 + 2] = tmpC.b * 2.5 * tw; gSize[i] = (W.rise ? 0.18 : 0.28) * p.sp;
+    }
+    wGeo.attributes.position.needsUpdate = wGeo.attributes.color.needsUpdate = wGeo.attributes.size.needsUpdate = true;
+    glowGeo.attributes.position.needsUpdate = glowGeo.attributes.color.needsUpdate = glowGeo.attributes.size.needsUpdate = true;
   }
 
   /* ------------------------------------------------------------ graces & markers */
   const graceObjs = LOC.grace.map((g) => {
     const y = heightAt(g.x, g.z);
-    const m = new T.Mesh(new T.OctahedronGeometry(0.35, 0), new T.MeshBasicMaterial({ color: '#ffe08a' }));
+    const m = new T.Mesh(new T.OctahedronGeometry(0.35, 0), new T.MeshBasicMaterial({ color: hdr('#ffe08a', 3) }));
     m.position.set(g.x, y + 1.3, g.z); scene.add(m);
-    const halo = new T.Sprite(new T.SpriteMaterial({ map: dot, color: '#ffcf5a', transparent: true, blending: T.AdditiveBlending, depthWrite: false }));
+    const halo = new T.Sprite(new T.SpriteMaterial({ map: dot, color: hdr('#ffcf5a', 2.2), transparent: true, blending: T.AdditiveBlending, depthWrite: false }));
     halo.scale.set(4, 4, 1); halo.position.copy(m.position); scene.add(halo);
     return Object.assign({ y, mesh: m, halo }, g);
   });
@@ -273,7 +587,7 @@
   function placeStain() {
     if (stainMesh) { scene.remove(stainMesh); stainMesh = null; }
     if (!S.stain) return;
-    stainMesh = new T.Sprite(new T.SpriteMaterial({ map: dot, color: '#7dffb0', transparent: true, blending: T.AdditiveBlending, depthWrite: false }));
+    stainMesh = new T.Sprite(new T.SpriteMaterial({ map: dot, color: hdr('#7dffb0', 2.5), transparent: true, blending: T.AdditiveBlending, depthWrite: false }));
     stainMesh.scale.set(2.4, 2.4, 1); stainMesh.position.set(S.stain.x, heightAt(S.stain.x, S.stain.z) + 0.8, S.stain.z);
     scene.add(stainMesh);
   }
@@ -298,92 +612,177 @@
   }
   recalc(true);
   const slime = new T.Group();
-  const bodyMat = new T.MeshStandardMaterial({ color: ch.color || '#4fc3ff', roughness: 0.15, metalness: 0.05, transparent: true, opacity: 0.88, emissive: '#0a2a40' });
-  const body = new T.Mesh(new T.SphereGeometry(1, 28, 18), bodyMat);
+  const bodyMat = new T.MeshPhysicalMaterial({ color: ch.color || '#4fc3ff', roughness: 0.08, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.06,
+    transparent: true, opacity: 0.86, emissive: '#06182a', envMapIntensity: 1.1, sheen: 0.15, sheenColor: new T.Color('#9fe8ff') });
+  const body = new T.Mesh(new T.SphereGeometry(1, 40, 28), bodyMat);
   body.castShadow = true; slime.add(body);
-  const core = new T.Mesh(new T.IcosahedronGeometry(0.28, 0), new T.MeshBasicMaterial({ color: mythic ? '#ffd54f' : '#c8f4ff' }));
+  const core = new T.Mesh(new T.IcosahedronGeometry(0.28, 0), new T.MeshBasicMaterial({ color: hdr(mythic ? '#ffd54f' : '#c8f4ff', 2.2) }));
   core.position.set(0, -0.15, 0); body.add(core);
-  const eyeMat = new T.MeshBasicMaterial({ color: '#10131c' }), shine = new T.MeshBasicMaterial({ color: '#ffffff' });
+  const eyeMat = new T.MeshStandardMaterial({ color: '#0b0e18', roughness: 0.1 }), shine = new T.MeshBasicMaterial({ color: hdr('#ffffff', 2) });
   for (const sx of [-0.32, 0.32]) {
-    const e = new T.Mesh(new T.SphereGeometry(0.17, 12, 10), eyeMat);
-    e.scale.set(0.8, 1.25, 0.6); e.position.set(sx, 0.18, 0.86); body.add(e);
-    const s = new T.Mesh(new T.SphereGeometry(0.05, 8, 6), shine); s.position.set(sx + 0.05, 0.28, 0.95); body.add(s);
+    const e = new T.Mesh(new T.SphereGeometry(0.17, 16, 12), eyeMat);
+    e.scale.set(0.8, 1.3, 0.6); e.position.set(sx, 0.18, 0.86); body.add(e);
+    const s = new T.Mesh(new T.SphereGeometry(0.055, 8, 6), shine); s.position.set(sx + 0.05, 0.29, 0.96); body.add(s);
+    const s2 = new T.Mesh(new T.SphereGeometry(0.025, 6, 5), shine); s2.position.set(sx - 0.04, 0.1, 0.97); body.add(s2);
   }
+  const cheekMat = new T.MeshBasicMaterial({ color: '#ff8fb0', transparent: true, opacity: 0.45 });
+  for (const sx of [-0.55, 0.55]) { const c = new T.Mesh(new T.SphereGeometry(0.11, 8, 6), cheekMat); c.scale.set(1, 0.55, 0.3); c.position.set(sx, -0.02, 0.8); body.add(c); }
   if (mythic || (main.best && main.best.level >= 30)) {
-    const crown = new T.Group(), gm = new T.MeshStandardMaterial({ color: '#ffcf40', metalness: 0.8, roughness: 0.25, emissive: '#5a3a00' });
-    crown.add(new T.Mesh(new T.CylinderGeometry(0.42, 0.46, 0.22, 10, 1, true), gm));
+    const crown = new T.Group(), gm = new T.MeshStandardMaterial({ color: '#ffcf40', metalness: 0.9, roughness: 0.2, emissive: '#3a2400' });
+    crown.add(new T.Mesh(new T.CylinderGeometry(0.42, 0.46, 0.22, 12, 1, true), gm));
     for (let i = 0; i < 5; i++) {
       const sp = new T.Mesh(new T.ConeGeometry(0.09, 0.3, 5), gm);
       const a = (i / 5) * TAU; sp.position.set(Math.cos(a) * 0.43, 0.22, Math.sin(a) * 0.43); crown.add(sp);
+      const gem = new T.Mesh(new T.OctahedronGeometry(0.05, 0), new T.MeshBasicMaterial({ color: hdr(['#ff3b6b', '#4fc3ff', '#7cff6a', '#b388ff', '#ffd54f'][i], 2.5) }));
+      gem.position.set(Math.cos(a) * 0.46, 0.02, Math.sin(a) * 0.46); crown.add(gem);
     }
     crown.position.y = 1.15; slime.add(crown); P.crown = crown;
   }
-  const auraRing = new T.Mesh(new T.RingGeometry(5.6, 6, 48), new T.MeshBasicMaterial({ color: '#ffd54f', transparent: true, opacity: 0.35, side: T.DoubleSide, depthWrite: false, blending: T.AdditiveBlending }));
+  const auraRing = new T.Mesh(new T.RingGeometry(5.6, 6, 64), new T.MeshBasicMaterial({ color: hdr('#ffd54f', 1.6), transparent: true, opacity: 0.35, side: T.DoubleSide, depthWrite: false, blending: T.AdditiveBlending }));
   auraRing.rotation.x = -Math.PI / 2; auraRing.visible = mythic; scene.add(auraRing);
-  const blade = new T.Mesh(new T.TorusGeometry(2.1, 0.12, 6, 24, Math.PI * 0.9), new T.MeshBasicMaterial({ color: '#9ff3ff', transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false }));
+  const blade = new T.Mesh(new T.TorusGeometry(2.1, 0.1, 6, 32, Math.PI * 0.9), new T.MeshBasicMaterial({ color: hdr('#9ff3ff', 2.6), transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false }));
   blade.rotation.x = -Math.PI / 2; scene.add(blade);
-  const vortex = new T.Mesh(new T.RingGeometry(0.5, 5, 40, 1, 0, TAU), new T.MeshBasicMaterial({ color: '#7c4dff', transparent: true, opacity: 0, side: T.DoubleSide, blending: T.AdditiveBlending, depthWrite: false }));
+  const vortex = new T.Mesh(new T.RingGeometry(0.5, 5, 48, 1, 0, TAU), new T.MeshBasicMaterial({ color: hdr('#7c4dff', 1.8), transparent: true, opacity: 0, side: T.DoubleSide, blending: T.AdditiveBlending, depthWrite: false }));
   vortex.rotation.x = -Math.PI / 2; scene.add(vortex);
   scene.add(slime);
 
-  /* ------------------------------------------------------------ enemies */
+  /* ------------------------------------------------------------ model kit */
   const BOX = new T.BoxGeometry(1, 1, 1);
-  function part(parent, mat, sx, sy, sz, x, y, z) {
-    const m = new T.Mesh(BOX, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+  const GEO = {};
+  const cap = (r, l) => GEO['c' + r + '_' + l] || (GEO['c' + r + '_' + l] = new T.CapsuleGeometry(r, l, 3, 8));
+  const sph = (r, w, h) => GEO['s' + r + '_' + (w || 10)] || (GEO['s' + r + '_' + (w || 10)] = new T.SphereGeometry(r, w || 10, h || 8));
+  const coneG = (r, h, n) => GEO['k' + r + '_' + h + '_' + (n || 6)] || (GEO['k' + r + '_' + h + '_' + (n || 6)] = new T.ConeGeometry(r, h, n || 6));
+  function mesh(parent, geo, mat, x, y, z, rx, ry, rz, sx, sy, sz) {
+    const m = new T.Mesh(geo, mat);
+    m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
+    if (sx != null) m.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
+    m.castShadow = true; parent.add(m); return m;
   }
+  function part(parent, mat, sx, sy, sz, x, y, z) { return mesh(parent, BOX, mat, x, y, z, 0, 0, 0, sx, sy, sz); }
   function pivot(parent, x, y, z) { const g = new T.Group(); g.position.set(x, y, z); parent.add(g); return g; }
-  function humanoid(skin, armor, weaponLen, s) {
-    const root = new T.Group(), g = new T.Group(); g.scale.setScalar(s); root.add(g);
-    const sk = lam(skin), ar = lam(armor), st = lam('#8a8f98', { flatShading: true });
-    const legL = pivot(g, -0.22, 1, 0), legR = pivot(g, 0.22, 1, 0);
-    part(legL, ar, 0.3, 1, 0.3, 0, -0.5, 0); part(legR, ar, 0.3, 1, 0.3, 0, -0.5, 0);
-    const torso = part(g, ar, 0.9, 1, 0.5, 0, 1.5, 0);
-    const head = part(g, sk, 0.55, 0.55, 0.55, 0, 2.3, 0.05);
-    part(head, lam('#ff3b2f', { emissive: '#ff2010' }), 0.18, 0.08, 0.05, -0.3, 0.1, 0.55);
-    part(head, lam('#ff3b2f', { emissive: '#ff2010' }), 0.18, 0.08, 0.05, 0.3, 0.1, 0.55);
-    const armL = pivot(g, -0.6, 1.95, 0), armR = pivot(g, 0.6, 1.95, 0);
-    part(armL, sk, 0.25, 0.9, 0.25, 0, -0.45, 0); part(armR, sk, 0.25, 0.9, 0.25, 0, -0.45, 0);
-    const weapon = part(armR, st, 0.12, weaponLen, 0.12, 0, -0.9 - weaponLen / 2, 0.1);
-    return { root, g, legL, legR, armL, armR, torso, head, weapon, s };
+  const HPAL = {
+    goblin: { skin: '#6d8a3a', cloth: '#5a4630', metal: '#8a8f98', eye: '#ffcf3a' },
+    knight: { skin: '#2a2d36', cloth: '#4a1c26', metal: '#4d5361', eye: '#ff3b2f' },
+    tyrant: { skin: '#7b6a52', cloth: '#5a2a1e', metal: '#6a5a48', eye: '#ff7a1a' },
+  };
+  function humanoid(kind, s) {
+    const pal = HPAL[kind], root = new T.Group(), g = new T.Group(); g.scale.setScalar(s); root.add(g);
+    const sk = std(pal.skin, 0.8), cl = std(pal.cloth, 0.95), mt = std(pal.metal, 0.32, 0.85), eye = new T.MeshBasicMaterial({ color: hdr(pal.eye, 3) });
+    const armored = kind !== 'goblin';
+    const legL = pivot(g, -0.2, 1.0, 0), legR = pivot(g, 0.2, 1.0, 0);
+    for (const L of [legL, legR]) { mesh(L, cap(0.13, 0.6), armored ? mt : sk, 0, -0.44, 0); mesh(L, BOX, armored ? mt : cl, 0, -0.93, 0.07, 0, 0, 0, 0.26, 0.16, 0.38); }
+    mesh(g, BOX, cl, 0, 1.06, 0, 0, 0, 0, 0.64, 0.3, 0.38);
+    const torso = mesh(g, sph(0.42, 12, 10), armored ? mt : sk, 0, 1.52, 0, 0, 0, 0, 1.05, 1.12, 0.7);
+    if (armored) {
+      mesh(g, BOX, mt, 0, 1.55, 0.2, 0.08, 0, 0, 0.62, 0.62, 0.12);
+      mesh(g, BOX, cl, 0, 0.82, 0.22, 0, 0, 0, 0.4, 0.7, 0.04);
+      for (const sx of [-1, 1]) mesh(g, sph(0.24, 10, 8), mt, sx * 0.5, 1.9, 0, 0, 0, sx * 0.3, 1.25, 0.8, 1.2);
+    } else {
+      mesh(g, BOX, cl, 0, 1.45, 0, 0, 0, 0, 0.7, 0.55, 0.48);
+      mesh(g, BOX, cl, 0, 0.82, 0.18, 0, 0, 0, 0.5, 0.45, 0.06);
+    }
+    const head = pivot(g, 0, 2.18, 0.02);
+    mesh(head, sph(0.27, 12, 10), sk, 0, 0, 0, 0, 0, 0, 1, kind === 'goblin' ? 0.95 : 1.05, 1);
+    if (kind === 'goblin') {
+      for (const sx of [-1, 1]) mesh(head, coneG(0.09, 0.46), sk, sx * 0.33, 0.05, -0.02, 0, 0, -sx * 1.25);
+      mesh(head, coneG(0.06, 0.2), sk, 0, -0.04, 0.3, 1.5, 0, 0);
+      for (const sx of [-1, 1]) mesh(head, sph(0.05, 6, 5), eye, sx * 0.11, 0.06, 0.24);
+      mesh(head, BOX, std('#e8e0c8', 0.6), 0, -0.15, 0.23, 0, 0, 0, 0.16, 0.04, 0.03);
+    } else if (kind === 'knight') {
+      mesh(head, new T.CylinderGeometry(0.3, 0.31, 0.46, 10), mt, 0, 0.04, 0);
+      mesh(head, coneG(0.31, 0.28, 10), mt, 0, 0.4, 0);
+      mesh(head, BOX, eye, 0, 0.04, 0.29, 0, 0, 0, 0.36, 0.05, 0.03);
+      mesh(head, coneG(0.05, 0.5), cl, 0, 0.62, -0.05, -0.4, 0, 0);
+    } else {
+      for (const sx of [-1, 1]) { const hp = pivot(head, sx * 0.24, 0.16, 0); mesh(hp, coneG(0.09, 0.7), std('#e0d6c0', 0.5), sx * 0.2, 0.25, -0.05, -0.3, 0, -sx * 0.9); }
+      for (const sx of [-1, 1]) mesh(head, sph(0.05, 6, 5), eye, sx * 0.1, 0.04, 0.25);
+      mesh(head, BOX, std('#4a3a2a', 0.9), 0, -0.24, 0.12, 0.2, 0, 0, 0.32, 0.3, 0.16);
+      const crownI = new T.CylinderGeometry(0.29, 0.29, 0.1, 10, 1, true);
+      mesh(head, crownI, mt, 0, 0.2, 0);
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; mesh(head, coneG(0.04, 0.16), mt, Math.cos(a) * 0.29, 0.3, Math.sin(a) * 0.29); }
+    }
+    const armL = pivot(g, -0.58, 1.9, 0), armR = pivot(g, 0.58, 1.9, 0);
+    for (const A of [armL, armR]) { mesh(A, cap(kind === 'tyrant' ? 0.15 : 0.11, 0.55), armored ? mt : sk, 0, -0.38, 0); mesh(A, sph(0.12, 8, 6), armored ? mt : sk, 0, -0.78, 0); }
+    let weapon;
+    if (kind === 'tyrant') {
+      weapon = pivot(armR, 0, -0.82, 0.1);
+      mesh(weapon, new T.CylinderGeometry(0.06, 0.06, 2.6, 6), std('#3a2a1e', 0.9), 0, -1.1, 0);
+      mesh(weapon, BOX, mt, 0, -2.45, 0, 0, 0, 0, 0.7, 0.45, 0.45);
+      for (const sx of [-1, 1]) mesh(weapon, coneG(0.12, 0.35), mt, sx * 0.45, -2.45, 0, 0, 0, -sx * Math.PI / 2);
+    } else if (kind === 'knight') {
+      weapon = pivot(armR, 0, -0.82, 0.1);
+      mesh(weapon, BOX, std('#c9a24a', 0.3, 0.9), 0, -0.05, 0, 0, 0, 0, 0.36, 0.06, 0.1);
+      mesh(weapon, BOX, std('#c9ced8', 0.15, 1), 0, -0.95, 0, 0, 0, 0, 0.09, 1.7, 0.03);
+    } else {
+      weapon = pivot(armR, 0, -0.82, 0.1);
+      mesh(weapon, cap(0.035, 0.3), std('#3a2a1e', 0.9), 0, -0.05, 0);
+      mesh(weapon, BOX, mt, 0.06, -0.62, 0, 0, 0, 0, 0.22, 0.9, 0.04);
+    }
+    let cape = null;
+    if (armored) {
+      cape = pivot(g, 0, 1.98, -0.28);
+      const cg = new T.PlaneGeometry(0.95, 1.55, 1, 4); cg.translate(0, -0.78, 0);
+      mesh(cape, cg, std(pal.cloth, 0.95, 0, { side: T.DoubleSide }), 0, 0, 0);
+    }
+    return { root, g, legL, legR, armL, armR, torso, head, weapon, s, cape };
   }
-  function wolfModel() {
+  function wolfModel(pal) {
+    pal = pal || { fur: '#4b4740', dark: '#2b2824', eye: '#ffcc33' };
     const root = new T.Group(), g = new T.Group(); root.add(g);
-    const fur = lam('#4b4740'), dark = lam('#2b2824');
-    part(g, fur, 0.6, 0.6, 1.5, 0, 0.9, 0);
-    const head = part(g, fur, 0.5, 0.45, 0.6, 0, 1.15, 0.95); part(head, dark, 0.6, 0.4, 0.5, 0, -0.2, 0.6);
-    part(head, lam('#ffcc33', { emissive: '#aa7700' }), 0.9, 0.12, 0.1, 0, 0.15, 0.5);
+    const fur = std(pal.fur, 0.95), dark = std(pal.dark, 0.95), eye = new T.MeshBasicMaterial({ color: hdr(pal.eye, 3) });
+    mesh(g, cap(0.32, 0.85), fur, 0, 0.95, -0.05, Math.PI / 2, 0, 0);
+    mesh(g, sph(0.42, 10, 8), dark, 0, 1.08, 0.45, 0, 0, 0, 1, 1.05, 1.05);
+    const head = pivot(g, 0, 1.28, 0.88);
+    mesh(head, sph(0.25, 10, 8), fur, 0, 0, 0, 0, 0, 0, 1, 0.9, 1.1);
+    mesh(head, cap(0.11, 0.28), dark, 0, -0.06, 0.3, Math.PI / 2, 0, 0);
+    mesh(head, sph(0.05, 6, 5), std('#080808', 0.3), 0, -0.02, 0.5);
+    for (const sx of [-1, 1]) { mesh(head, coneG(0.08, 0.22, 4), fur, sx * 0.13, 0.25, -0.05, -0.2, 0, sx * 0.2); mesh(head, sph(0.04, 6, 5), eye, sx * 0.1, 0.05, 0.2); }
     const legs = [];
-    for (const [x, z] of [[-0.22, 0.55], [0.22, 0.55], [-0.22, -0.55], [0.22, -0.55]]) { const l = pivot(g, x, 0.7, z); part(l, dark, 0.16, 0.7, 0.16, 0, -0.35, 0); legs.push(l); }
-    const tail = pivot(g, 0, 1.05, -0.75); part(tail, fur, 0.14, 0.14, 0.7, 0, 0, -0.35);
+    for (const [x, z] of [[-0.2, 0.5], [0.2, 0.5], [-0.2, -0.5], [0.2, -0.5]]) { const l = pivot(g, x, 0.78, z); mesh(l, cap(0.075, 0.5), dark, 0, -0.35, 0); mesh(l, sph(0.09, 6, 5), dark, 0, -0.68, 0.04); legs.push(l); }
+    const tail = pivot(g, 0, 1.1, -0.72); mesh(tail, cap(0.09, 0.55), fur, 0, 0, -0.32, Math.PI / 2, 0, 0);
     return { root, g, legs, tail, head, s: 1 };
   }
   function dragonModel() {
     const root = new T.Group(), g = new T.Group(); g.scale.setScalar(2.6); root.add(g);
-    const sc = lam('#4b5a6e'), belly = lam('#a99a7a'), horn = lam('#d8d0c0');
-    part(g, sc, 1.8, 1.6, 3.6, 0, 2.2, 0); part(g, belly, 1.4, 0.5, 3, 0, 1.5, 0.1);
-    const neck = pivot(g, 0, 2.6, 1.7); part(neck, sc, 0.8, 0.8, 1.8, 0, 0.6, 0.8);
-    const head = pivot(neck, 0, 1.1, 1.8); part(head, sc, 0.9, 0.7, 1.3, 0, 0, 0.4);
-    part(head, horn, 0.12, 0.12, 0.8, -0.3, 0.45, -0.3).rotation.x = 0.5; part(head, horn, 0.12, 0.12, 0.8, 0.3, 0.45, -0.3).rotation.x = 0.5;
-    part(head, lam('#ffb74d', { emissive: '#ff6d00' }), 0.95, 0.1, 0.1, 0, 0.18, 0.7);
+    const sc = std('#3f4e66', 0.5, 0.3), belly = std('#a99a7a', 0.8), horn = std('#e0d8c6', 0.45), eye = new T.MeshBasicMaterial({ color: hdr('#9fd8ff', 4) });
+    const mem = std('#5e3a46', 0.85, 0, { side: T.DoubleSide });
+    mesh(g, cap(0.95, 2.1), sc, 0, 2.2, 0, Math.PI / 2, 0, 0);
+    mesh(g, cap(0.72, 1.7), belly, 0, 1.78, 0.1, Math.PI / 2, 0, 0, 1, 1, 0.75);
+    for (let i = 0; i < 7; i++) mesh(g, coneG(0.16, 0.55, 4), horn, 0, 3.15 - Math.abs(i - 2) * 0.05, 1.3 - i * 0.48, -0.3, 0, 0);
+    const neck = pivot(g, 0, 2.6, 1.4);
+    mesh(neck, cap(0.42, 0.9), sc, 0, 0.45, 0.45, 0.9, 0, 0);
+    const head = pivot(neck, 0, 1.0, 1.15);
+    mesh(head, sph(0.5, 12, 10), sc, 0, 0, 0, 0, 0, 0, 0.9, 0.72, 1.25);
+    mesh(head, cap(0.28, 0.55), sc, 0, -0.08, 0.72, Math.PI / 2, 0, 0, 1, 1, 0.8);
+    const jaw = pivot(head, 0, -0.22, 0.2); mesh(jaw, cap(0.22, 0.6), belly, 0, -0.05, 0.45, Math.PI / 2, 0, 0, 1, 1, 0.6);
+    for (const sx of [-1, 1]) {
+      mesh(head, coneG(0.1, 0.9, 5), horn, sx * 0.3, 0.32, -0.45, -2.3, 0, sx * 0.2);
+      mesh(head, sph(0.07, 6, 5), eye, sx * 0.28, 0.12, 0.42);
+    }
     const legs = [];
-    for (const [x, z] of [[-0.8, 1.2], [0.8, 1.2], [-0.8, -1.2], [0.8, -1.2]]) { const l = pivot(g, x, 1.6, z); part(l, sc, 0.5, 1.6, 0.5, 0, -0.8, 0); legs.push(l); }
-    const tail = pivot(g, 0, 2.2, -1.8); part(tail, sc, 0.6, 0.6, 3, 0, 0, -1.5);
+    for (const [x, z] of [[-0.8, 1.1], [0.8, 1.1], [-0.8, -1.1], [0.8, -1.1]]) { const l = pivot(g, x, 1.75, z); mesh(l, cap(0.3, 0.9), sc, 0, -0.75, 0); mesh(l, sph(0.32, 8, 6), sc, 0, -1.55, 0.12, 0, 0, 0, 1, 0.55, 1.3); legs.push(l); }
+    const tail = pivot(g, 0, 2.15, -1.55); mesh(tail, cap(0.42, 1.0), sc, 0, 0, -0.7, Math.PI / 2, 0, 0);
+    const tail2 = pivot(tail, 0, 0, -1.35); mesh(tail2, cap(0.3, 1.0), sc, 0, 0, -0.65, Math.PI / 2, 0, 0);
+    const tail3 = pivot(tail2, 0, 0, -1.3); mesh(tail3, cap(0.18, 0.9), sc, 0, 0, -0.55, Math.PI / 2, 0, 0); mesh(tail3, coneG(0.35, 0.6, 4), horn, 0, 0, -1.2, -Math.PI / 2, 0, 0, 1, 1, 0.3);
     const wingGeo = new T.BufferGeometry();
-    wingGeo.setAttribute('position', new T.Float32BufferAttribute([0, 0, 0.8, 0, 0, -1.2, 5.5, 0.6, -2.2, 0, 0, 0.8, 5.5, 0.6, -2.2, 4.5, 1.2, 1.4], 3));
+    wingGeo.setAttribute('position', new T.Float32BufferAttribute([0, 0, 0.6, 6, 0.8, -0.2, 5.2, 0, -2.6, 0, 0, 0.6, 5.2, 0, -2.6, 2.6, -0.2, -2.2, 0, 0, 0.6, 2.6, -0.2, -2.2, 0, 0, -1.2], 3));
     wingGeo.computeVertexNormals();
-    const wm = new T.MeshLambertMaterial({ color: '#6e4a4a', side: T.DoubleSide, flatShading: true });
-    const wingL = pivot(g, -0.8, 3, 0), wingR = pivot(g, 0.8, 3, 0);
-    const wl = new T.Mesh(wingGeo, wm); wl.scale.x = -1; wingL.add(wl); wingR.add(new T.Mesh(wingGeo, wm));
-    return { root, g, neck, head, legs, tail, wingL, wingR, s: 2.6 };
+    const wingL = pivot(g, -0.75, 3.0, 0.4), wingR = pivot(g, 0.75, 3.0, 0.4);
+    for (const [W, sx] of [[wingL, -1], [wingR, 1]]) {
+      const m = mesh(W, wingGeo, mem, 0, 0, 0); m.scale.x = sx;
+      mesh(W, cap(0.08, 5.6), horn, sx * 3, 0.42, 0.2, 0, 0, sx * (Math.PI / 2 - 0.13));
+      mesh(W, cap(0.05, 2.8), horn, sx * 5.6, 0.4, -1.3, 0.25, 0, 0);
+    }
+    return { root, g, neck, head, jaw, legs, tail, tail2, tail3, wingL, wingR, s: 2.6 };
   }
   const TYPES = {
-    soldier: { name: 'Soldato Goblin', hp: 90, r: 0.7, speed: 3.4, aggro: 16, runes: 40, build: () => humanoid('#6d8a3a', '#5a4630', 1.2, 1),
+    soldier: { name: 'Soldato Goblin', hp: 90, r: 0.7, speed: 3.4, aggro: 16, runes: 40, build: () => humanoid('goblin', 1),
       attacks: [{ range: 2.4, windup: 0.55, active: 0.18, recover: 0.6, dmg: 45, reach: 2.6, arc: 1.4 }] },
     wolf: { name: 'Lupo Famelico', hp: 60, r: 0.7, speed: 6.5, aggro: 20, runes: 35, build: wolfModel,
       attacks: [{ range: 3.5, windup: 0.35, active: 0.25, recover: 0.5, dmg: 35, reach: 2.4, arc: 1.2, lunge: 11 }] },
-    knight: { name: 'Cavaliere Oscuro', hp: 320, r: 0.9, speed: 2.8, aggro: 15, runes: 220, poise: 60, build: () => humanoid('#2c2f3a', '#3a3d4a', 1.7, 1.25),
+    knight: { name: 'Cavaliere Oscuro', hp: 320, r: 0.9, speed: 2.8, aggro: 15, runes: 220, poise: 60, build: () => humanoid('knight', 1.25),
       attacks: [{ range: 3, windup: 0.8, active: 0.2, recover: 0.7, dmg: 80, reach: 3.3, arc: 1.6 }, { range: 3, windup: 0.5, active: 0.2, recover: 0.4, dmg: 55, reach: 3.2, arc: 1.2, combo: 2 }] },
-    tyrant: { name: 'Gorvan, Tiranno Caduto', boss: true, hp: 3200, r: 1.8, speed: 4, aggro: 60, runes: 4000, poise: 400, build: () => humanoid('#7b6a52', '#4a3a2a', 2.6, 3),
+    tyrant: { name: 'Gorvan, Tiranno Caduto', boss: true, hp: 3200, r: 1.8, speed: 4, aggro: 60, runes: 4000, poise: 400, build: () => humanoid('tyrant', 3),
       attacks: [
         { name: 'slam', range: 5.5, windup: 1.0, active: 0.2, recover: 0.9, dmg: 140, reach: 5.5, arc: 1.2, wave: 9 },
         { name: 'sweep', range: 6, windup: 0.7, active: 0.3, recover: 0.6, dmg: 110, reach: 6.5, arc: 2.8 },
@@ -401,42 +800,47 @@
   /* ------------------------------------------------------------ Mimetismo: player forms */
   const human = (() => {
     const root = new T.Group(), g = new T.Group(); root.add(g);
-    const skin = lam('#f1d7c4'), coat = lam('#eef2f8'), trim = lam('#d9b44a'), dark = lam('#262a36');
-    const hair = lam(ch.color || '#7fd4ff'), eye = new T.MeshBasicMaterial({ color: '#ffcc33' });
-    const legL = pivot(g, -0.16, 0.95, 0), legR = pivot(g, 0.16, 0.95, 0);
-    part(legL, dark, 0.22, 0.95, 0.24, 0, -0.47, 0); part(legR, dark, 0.22, 0.95, 0.24, 0, -0.47, 0);
-    part(legL, trim, 0.24, 0.12, 0.3, 0, -0.92, 0.04); part(legR, trim, 0.24, 0.12, 0.3, 0, -0.92, 0.04);
-    const torso = part(g, coat, 0.62, 0.78, 0.36, 0, 1.36, 0);
-    part(g, coat, 0.7, 0.5, 0.4, 0, 0.92, -0.02); // coat skirt
-    part(g, trim, 0.64, 0.08, 0.38, 0, 1.0, 0); part(g, trim, 0.06, 0.78, 0.38, 0, 1.36, 0.01);
-    const head = pivot(g, 0, 1.98, 0);
-    part(head, skin, 0.42, 0.46, 0.4, 0, 0, 0.02);
-    part(head, hair, 0.48, 0.18, 0.46, 0, 0.24, -0.01); // crown of hair
-    part(head, hair, 0.5, 0.42, 0.14, 0, 0.02, -0.2); // back
-    part(head, hair, 0.5, 0.75, 0.2, 0, -0.32, -0.26); // long hair
-    part(head, hair, 0.14, 0.38, 0.14, -0.22, 0.02, 0.17); part(head, hair, 0.14, 0.38, 0.14, 0.22, 0.02, 0.17); // side locks
-    part(head, hair, 0.36, 0.1, 0.1, 0, 0.17, 0.21); // fringe
-    part(head, eye, 0.08, 0.07, 0.02, -0.1, 0.02, 0.23); part(head, eye, 0.08, 0.07, 0.02, 0.1, 0.02, 0.23);
-    const armL = pivot(g, -0.42, 1.7, 0), armR = pivot(g, 0.42, 1.7, 0);
-    part(armL, coat, 0.18, 0.7, 0.2, 0, -0.35, 0); part(armR, coat, 0.18, 0.7, 0.2, 0, -0.35, 0);
-    part(armL, skin, 0.13, 0.16, 0.14, 0, -0.76, 0); part(armR, skin, 0.13, 0.16, 0.14, 0, -0.76, 0);
-    const sword = new T.Group(); sword.position.set(0, -0.8, 0.05); armR.add(sword);
-    part(sword, trim, 0.32, 0.06, 0.1, 0, 0, 0); part(sword, dark, 0.06, 0.22, 0.06, 0, 0.12, 0);
-    const bl = part(sword, new T.MeshBasicMaterial({ color: '#9ff3ff' }), 0.07, 1.5, 0.03, 0, -0.78, 0);
-    let crown = null;
+    const skin = std('#f3dccb', 0.7), coat = std('#f2f5fa', 0.55), trim = std('#d9b44a', 0.25, 0.9), dark = std('#1e2230', 0.6);
+    const hair = std(ch.color || '#7fd4ff', 0.4), eye = new T.MeshBasicMaterial({ color: hdr('#ffcc33', 2.6) });
+    const legL = pivot(g, -0.13, 0.95, 0), legR = pivot(g, 0.13, 0.95, 0);
+    for (const L of [legL, legR]) { mesh(L, cap(0.085, 0.62), dark, 0, -0.42, 0); mesh(L, BOX, dark, 0, -0.88, 0.05, 0, 0, 0, 0.17, 0.14, 0.3); mesh(L, BOX, trim, 0, -0.8, 0.05, 0, 0, 0, 0.18, 0.03, 0.31); }
+    mesh(g, BOX, dark, 0, 1.0, 0, 0, 0, 0, 0.36, 0.2, 0.22);
+    const torso = mesh(g, cap(0.19, 0.32), coat, 0, 1.38, 0, 0, 0, 0, 1.3, 1, 0.85);
+    mesh(g, new T.CylinderGeometry(0.27, 0.44, 0.62, 12, 1, true), std('#f2f5fa', 0.55, 0, { side: T.DoubleSide }), 0, 0.9, 0);
+    mesh(g, new T.CylinderGeometry(0.255, 0.27, 0.06, 12), trim, 0, 1.18, 0);
+    mesh(g, new T.CylinderGeometry(0.12, 0.16, 0.1, 10), trim, 0, 1.66, 0);
+    mesh(g, BOX, trim, 0, 1.38, 0.17, 0, 0, 0, 0.04, 0.42, 0.02);
+    const coatTail = pivot(g, 0, 1.12, -0.2);
+    const ctg = new T.PlaneGeometry(0.5, 0.7, 1, 3); ctg.translate(0, -0.35, 0);
+    mesh(coatTail, ctg, std('#f2f5fa', 0.55, 0, { side: T.DoubleSide }), 0, 0, 0);
+    const head = pivot(g, 0, 1.9, 0);
+    mesh(head, sph(0.2, 16, 12), skin, 0, 0, 0, 0, 0, 0, 0.95, 1.08, 0.98);
+    mesh(head, sph(0.225, 16, 12), hair, 0, 0.06, -0.035, 0, 0, 0, 1.05, 1, 1.05);
+    for (let i = 0; i < 5; i++) mesh(head, coneG(0.055, 0.2, 4), hair, -0.12 + i * 0.06, 0.12, 0.16, 2.9, 0, (i - 2) * 0.12);
+    for (const sx of [-1, 1]) { mesh(head, cap(0.04, 0.3), hair, sx * 0.17, -0.08, 0.06); mesh(head, sph(0.035, 8, 6), eye, sx * 0.075, 0.0, 0.185, 0, 0, 0, 1, 1.25, 0.5); }
+    const hairP = pivot(head, 0, 0.06, -0.14);
+    mesh(hairP, cap(0.12, 0.5), hair, 0, -0.32, -0.02, 0, 0, 0, 1.55, 1, 0.8);
+    const armL = pivot(g, -0.3, 1.62, 0), armR = pivot(g, 0.3, 1.62, 0);
+    for (const A of [armL, armR]) { mesh(A, cap(0.07, 0.48), coat, 0, -0.3, 0); mesh(A, BOX, trim, 0, -0.52, 0, 0, 0, 0, 0.16, 0.04, 0.16); mesh(A, sph(0.065, 8, 6), skin, 0, -0.62, 0); }
+    const sword = pivot(armR, 0, -0.66, 0.04);
+    mesh(sword, BOX, trim, 0, 0, 0, 0, 0, 0, 0.3, 0.05, 0.09);
+    mesh(sword, cap(0.03, 0.18), dark, 0, 0.14, 0);
+    const bl = mesh(sword, BOX, new T.MeshBasicMaterial({ color: hdr('#9ff3ff', 1.8) }), 0, -0.8, 0, 0, 0, 0, 0.07, 1.5, 0.025);
+    mesh(sword, coneG(0.05, 0.16, 4), bl.material, 0, -1.62, 0, Math.PI, Math.PI / 4, 0, 1, 1, 0.35);
     if (mythic) {
-      const gm = new T.MeshStandardMaterial({ color: '#ffcf40', metalness: 0.8, roughness: 0.25, emissive: '#5a3a00' });
-      crown = new T.Mesh(new T.CylinderGeometry(0.26, 0.28, 0.12, 10, 1, true), gm); crown.position.y = 0.38; head.add(crown);
-      for (let i = 0; i < 5; i++) { const c = new T.Mesh(new T.ConeGeometry(0.05, 0.18, 5), gm), a = (i / 5) * TAU; c.position.set(Math.cos(a) * 0.27, 0.13, Math.sin(a) * 0.27); crown.add(c); }
+      const gm = new T.MeshStandardMaterial({ color: '#ffcf40', metalness: 0.9, roughness: 0.2, emissive: '#3a2400' });
+      const crown = mesh(head, new T.CylinderGeometry(0.2, 0.22, 0.09, 12, 1, true), gm, 0, 0.27, -0.02);
+      for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU; mesh(crown, coneG(0.04, 0.14, 4), gm, Math.cos(a) * 0.21, 0.1, Math.sin(a) * 0.21); }
     }
-    root.traverse((m) => { if (m.isMesh) m.castShadow = true; });
     root.visible = false; scene.add(root);
-    return { root, g, legL, legR, armL, armR, head, sword, blade: bl, torso };
+    return { root, g, legL, legR, armL, armR, head, sword, blade: bl, torso, hair: hairP, tail: coatTail };
   })();
   const wolfForm = (() => {
-    const m = wolfModel();
+    const m = wolfModel({ fur: '#2c3f5e', dark: '#1a2236', eye: '#8ec5ff' });
+    const glow = new T.MeshBasicMaterial({ color: hdr('#6aa8ff', 2.2) });
+    for (let i = 0; i < 4; i++) mesh(m.g, BOX, glow, 0, 1.28, 0.5 - i * 0.35, 0, 0, 0, 0.05, 0.04, 0.22);
+    mesh(m.head, coneG(0.05, 0.35, 4), std('#dfe8ff', 0.3, 0.6), 0, 0.28, 0.12, -0.4, 0, 0);
     m.root.scale.setScalar(1.35);
-    m.root.traverse((o) => { if (o.isMesh) { o.material = o.material.clone(); if (o.material.color.getHex() === 0x4b4740) o.material.color.set('#2c3f5e'); if (o.material.color.getHex() === 0x2b2824) o.material.color.set('#1a2236'); } });
     m.root.visible = false; scene.add(m.root);
     return m;
   })();
@@ -481,6 +885,7 @@
     for (let i = 0; i < 40; i++) { const a = rand(0, TAU), r = rand(40, MAPR - 80); spawn(Math.random() < 0.55 ? 'soldier' : 'wolf', Math.cos(a) * r, Math.sin(a) * r); }
     if (!S.bosses.tyrant) spawn('tyrant', LOC.arena.x, LOC.arena.z - 8, { rot: 0 });
     if (!S.bosses.dragon) spawn('dragon', LOC.dragon.x, LOC.dragon.z, { rot: 0 });
+    hook('populate');
   }
 
   /* ------------------------------------------------------------ effects (waves, bolts, daggers) */
@@ -497,7 +902,11 @@
       const t = i / 10, j = i && i < 10 ? 1.2 : 0;
       pts.push(new T.Vector3(lerp(x1, x2, t) + rand(-j, j), lerp(y1, y2, t) + rand(-j, j), lerp(z1, z2, t) + rand(-j, j)));
     }
-    const l = new T.Line(new T.BufferGeometry().setFromPoints(pts), new T.LineBasicMaterial({ color: color || '#c9a0ff', transparent: true }));
+    const curve = new T.CatmullRomCurve3(pts);
+    const col = new T.Color(color || '#c9a0ff');
+    const l = new T.Mesh(new T.TubeGeometry(curve, 24, 0.09, 4), new T.MeshBasicMaterial({ color: col.clone().multiplyScalar(3.2), transparent: true, depthWrite: false, blending: T.AdditiveBlending }));
+    const core = new T.Mesh(new T.TubeGeometry(curve, 24, 0.035, 3), new T.MeshBasicMaterial({ color: new T.Color(4, 4, 4), transparent: true, depthWrite: false }));
+    l.add(core);
     scene.add(l); fx.push({ kind: 'line', m: l, t: 0.3 });
     flashLight.color.set(color || '#b388ff'); flashLight.intensity = 60; flashLight.position.set(x2, y2 + 2, z2);
   }
@@ -522,8 +931,8 @@
         if (!f.hit && Math.abs(d - f.r * 1.1) < 1.2 && P.y < 0.6) { f.hit = true; hurtPlayer(f.dmg, f.x, f.z); }
         if (f.r >= f.maxR) { scene.remove(f.m); fx.splice(i, 1); }
       } else if (f.kind === 'line') {
-        f.t -= dt; f.m.material.opacity = f.t / 0.3;
-        if (f.t <= 0) { scene.remove(f.m); fx.splice(i, 1); }
+        f.t -= dt; f.m.material.opacity = f.t / 0.3; f.m.children[0].material.opacity = f.t / 0.3;
+        if (f.t <= 0) { scene.remove(f.m); f.m.geometry.dispose(); f.m.children[0].geometry.dispose(); fx.splice(i, 1); }
       } else if (f.kind === 'strike') {
         f.t -= dt; f.m.material.opacity = 0.2 + 0.4 * Math.abs(Math.sin(f.t * 14));
         if (f.t <= 0) {
@@ -586,7 +995,8 @@
   const touchEl = $('touch');
   const BTN = [['light', 'Attacco', 66, 96, 34, 'big'], ['heavy', 'Colpo<br>pesante', 140, 60, 26], ['roll', 'Schiva', 140, 140, 28],
     ['skill', 'Fulmine<br>Nero', 66, 178, 24], ['absorb', 'Preda-<br>tore', 214, 104, 24], ['flask', 'Cura', 28, 252, 21], ['lock', 'Mira', 214, 178, 21], ['run', 'Corri', 214, 36, 21], ['form', 'Mime-<br>tismo', 140, 220, 23]];
-  for (const [k, label, rx, by, r, cls] of BTN) {
+  const buttons = {};
+  function addButton(k, label, rx, by, r, cls) {
     const b = document.createElement('div');
     b.className = 'tbtn' + (cls ? ' ' + cls : '');
     b.innerHTML = label;
@@ -594,8 +1004,10 @@
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); press(k); b.classList.add('on'); try { SK.Audio.init(); SK.Audio.resume(); } catch (er) { /* ignore */ } SK.vibrate(10); });
     const off = () => b.classList.remove('on');
     b.addEventListener('pointerup', off); b.addEventListener('pointerleave', off);
-    touchEl.appendChild(b);
+    touchEl.appendChild(b); buttons[k] = b;
+    return b;
   }
+  for (const [k, label, rx, by, r, cls] of BTN) addButton(k, label, rx, by, r, cls);
   {
     const b = document.createElement('div');
     const mb = document.createElement('div');
@@ -642,12 +1054,13 @@
   /* ------------------------------------------------------------ combat */
   function hurtPlayer(dmg, fx0, fz0) {
     if (P.dead || P.iframe > 0 || state !== 'play') return;
+    dmg = chain('onHurt', dmg, fx0, fz0);
     if (SK.debug.godmode) dmg = 0;
     P.hp -= dmg; P.hitFlash = 0.25; P.stun = 0.35; P.atk = null;
     const a = Math.atan2(P.x - fx0, P.z - fz0);
     P.vx = Math.sin(a) * 9; P.vz = Math.cos(a) * 9;
     shake = 0.5; sfx('hurt'); SK.vibrate(40);
-    emit(P.x, P.y + 1, P.z, 18, '#ff5252', { speed: 6 });
+    emit(P.x, heightAt(P.x, P.z) + P.y + 1, P.z, 18, '#ff5252', { speed: 6 });
     if (P.hp <= 0) die();
   }
   function hitEnemy(e, dmg, poiseDmg, kx, kz) {
@@ -671,6 +1084,8 @@
     emit(e.x, e.y + 1, e.z, e.d.boss ? 160 : 30, absorbed ? '#b388ff' : '#ffe08a', { speed: e.d.boss ? 14 : 6, up: 3, life: 1.6 });
     sfx(e.d.boss ? 'bossDie' : 'kill');
     if (input.lock === e) input.lock = null;
+    e.absorbed = !!absorbed;
+    hook('onKill', e, !!absorbed, gain);
     if (e.d.boss) {
       S.bosses[e.type] = true;
       main.souls = (main.souls || 0) + 100; main.totalSouls = (main.totalSouls || 0) + 100; SK.save.write();
@@ -706,7 +1121,7 @@
   }
   function resolveAttack() {
     const F = FORM[P.form], a = P.atk, reach = (a.heavy ? 4 : 3.2) + F.reach, arc = a.heavy ? Math.PI : 1.2;
-    const base = (a.heavy ? 70 : [32, 36, 48][P.combo]) * P.dmg * F.dmg;
+    const base = chain('onMelee', (a.heavy ? 70 : [32, 36, 48][P.combo]) * P.dmg * F.dmg, a);
     let any = false;
     for (const e of enemies) {
       if (e.dead) continue;
@@ -718,8 +1133,8 @@
     }
     if (a.heavy) { shockwave(P.x, P.z, 5, 0, '#9ff3ff'); shake = 0.35; }
     blade.material.opacity = 0.9;
-    blade.position.set(P.x, P.y + 1, P.z); blade.rotation.z = -P.rot + Math.PI * 0.05 + (P.combo % 2 ? 0.4 : -0.4);
-    emit(P.x + Math.sin(P.rot) * 2, P.y + 1, P.z + Math.cos(P.rot) * 2, any ? 10 : 6, '#9ff3ff', { speed: 5 });
+    blade.position.set(P.x, heightAt(P.x, P.z) + P.y + 1, P.z); blade.rotation.z = -P.rot + Math.PI * 0.05 + (P.combo % 2 ? 0.4 : -0.4);
+    emit(P.x + Math.sin(P.rot) * 2, heightAt(P.x, P.z) + P.y + 1, P.z + Math.cos(P.rot) * 2, any ? 10 : 6, '#9ff3ff', { speed: 5 });
   }
   function castLightning() {
     if (P.fp < 30) { toast('FP insufficienti'); sfx('uiBack'); return; }
@@ -732,7 +1147,7 @@
     P.fp -= 30;
     const hitList = [target];
     for (const e of enemies) { if (hitList.length >= 3) break; if (!e.dead && e !== target && Math.hypot(e.x - target.x, e.z - target.z) < 10) hitList.push(e); }
-    let px = P.x, py = P.y + 1.5, pz = P.z;
+    let px = P.x, py = heightAt(P.x, P.z) + P.y + 1.5, pz = P.z;
     for (const e of hitList) {
       const ty = e.y + (e.d.boss ? 4 : 1.2);
       bolt(px, py, pz, e.x, ty, e.z); bolt(e.x + rand(-2, 2), ty + 25, e.z + rand(-2, 2), e.x, ty, e.z);
@@ -748,10 +1163,10 @@
   function updateAbsorb(dt) {
     if (P.absorb <= 0) { vortex.material.opacity = Math.max(0, vortex.material.opacity - dt * 3); return; }
     P.absorb -= dt;
-    vortex.position.set(P.x, P.y + 0.2, P.z); vortex.rotation.z += dt * 8; vortex.material.opacity = 0.55;
+    vortex.position.set(P.x, heightAt(P.x, P.z) + P.y + 0.2, P.z); vortex.rotation.z += dt * 8; vortex.material.opacity = 0.55;
     if (Math.random() < 0.6) {
       const a = rand(0, TAU), r = rand(3, 6);
-      parts.push({ x: P.x + Math.cos(a) * r, y: P.y + 0.6, z: P.z + Math.sin(a) * r, vx: -Math.cos(a) * r * 2, vy: 0, vz: -Math.sin(a) * r * 2, life: 0.45, max: 0.45, r: 0.7, g: 0.4, b: 1, grav: 0 });
+      parts.push({ x: P.x + Math.cos(a) * r, y: heightAt(P.x, P.z) + P.y + 0.6, z: P.z + Math.sin(a) * r, vx: -Math.cos(a) * r * 2, vy: 0, vz: -Math.sin(a) * r * 2, life: 0.45, max: 0.45, r: 1.4, g: 0.8, b: 2.6, grav: 0, size: 0.35 });
     }
     for (const e of enemies) {
       if (e.dead || e.d.boss) continue;
@@ -769,7 +1184,7 @@
     if (P.flasks <= 0) { toast('Nessuna Gelatina rimasta'); return; }
     if (P.atk || P.roll > 0) return;
     P.flasks--; P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.55); sfx('heal');
-    emit(P.x, P.y + 1, P.z, 24, '#ff6b6b', { speed: 2, up: 3, grav: 0 });
+    emit(P.x, heightAt(P.x, P.z) + P.y + 1, P.z, 24, '#ff6b6b', { speed: 2, up: 3, grav: 0 });
   }
   function toggleLock() {
     if (input.lock) { input.lock = null; return; }
@@ -809,7 +1224,7 @@
         P.roll = 0.45; P.iframe = mythic ? 0.45 : 0.32; P.rot = ra; P.vx = Math.sin(ra) * 13; P.vz = Math.cos(ra) * 13; sfx('dash');
       }
       if ((pr.light || pr.heavy) && P.roll <= 0 && (!P.atk || P.atk.t > P.atk.dur * 0.7)) startAttack(!!pr.heavy);
-      if (pr.skill && !P.atk) castLightning();
+      if (pr.skill && !P.atk) { if (API.castSkill) API.castSkill(); else castLightning(); }
       if (pr.absorb) startAbsorb();
       if (pr.flask) drinkFlask();
     }
@@ -867,7 +1282,8 @@
         else { const dir = P.combo % 2 ? -1 : 1; h.g.rotation.y = 0; h.armR.rotation.x = -1.4; h.armR.rotation.z = lerp(1.6 * dir, -1.4 * dir, Math.min(1, k * 2.2)); }
       } else { h.g.rotation.y = 0; h.armR.rotation.x = walk * 0.5 - 0.15; h.armR.rotation.z = 0; }
       h.g.rotation.x = P.roll > 0 ? (1 - P.roll / 0.45) * TAU : 0; h.g.position.y = P.roll > 0 ? 0.3 : Math.abs(walk) * 0.05;
-      h.blade.material.color.set(P.atk ? '#e6ffff' : '#9ff3ff');
+      h.blade.material.color.setRGB(P.atk ? 3.4 : 1.1, P.atk ? 4.2 : 2.6, P.atk ? 4.4 : 2.9);
+      h.hair.rotation.x = 0.12 + Math.min(0.7, sp * 0.07) + Math.sin(t * 4) * 0.04; h.tail.rotation.x = 0.1 + Math.min(0.9, sp * 0.09) + Math.sin(t * 5) * 0.05;
     } else if (P.form === 'wolf') {
       const w = wolfForm, gal = sp > 1 ? t * (sp > 9 ? 18 : 13) : 0;
       w.root.position.set(P.x, gy + P.y, P.z); w.root.rotation.y = P.rot; w.root.scale.setScalar(1.35 * pop);
@@ -917,14 +1333,29 @@
     const m = e.model, d = e.d;
     if (e.dead) {
       e.deadT += dt;
-      m.root.position.y = e.y - e.deadT * (d.boss ? 1.5 : 2);
-      m.root.scale.setScalar(Math.max(0.01, 1 - e.deadT * 0.6));
-      if (e.deadT > 1.6) m.root.visible = false;
+      if (e.absorbed) { // spiral into the Predatore's mouth
+        const k = Math.min(1, e.deadT / 0.7), py = heightAt(P.x, P.z) + P.y + 0.9, ang = e.deadT * 14, rad = (1 - k) * 2.2;
+        m.root.position.set(lerp(e.x, P.x, k * k) + Math.cos(ang) * rad, lerp(e.y, py, k) + Math.sin(k * Math.PI) * 1.4, lerp(e.z, P.z, k * k) + Math.sin(ang) * rad);
+        m.root.rotation.y += dt * 20; m.root.scale.setScalar(Math.max(0.01, (1 - k) * (e.scale0 || 1)));
+        if (Math.random() < 0.6) emit(m.root.position.x, m.root.position.y, m.root.position.z, 1, '#b388ff', { speed: 1, grav: 0, size: 0.5 });
+        if (k >= 1) m.root.visible = false;
+        return;
+      }
+      const k = Math.min(1, e.deadT / 0.45), quad = !!(m.legs && !m.legL);
+      if (quad) m.g.rotation.z = k * Math.PI / 2; else m.g.rotation.x = -k * Math.PI / 2 * (d.boss ? 0.9 : 1);
+      if (e.deadT > 0.7) {
+        const s2 = Math.max(0.01, 1 - (e.deadT - 0.7) * 0.9);
+        m.root.position.y = e.y - (e.deadT - 0.7) * (d.boss ? 1.2 : 0.8); m.root.scale.setScalar(s2 * (e.scale0 || 1));
+        if (Math.random() < 0.7) emit(e.x + rand(-1, 1) * d.r, e.y + rand(0.2, 1.5) * (d.boss ? 3 : 1), e.z + rand(-1, 1) * d.r, 1, '#ffd36b', { speed: 0.6, up: 1.5, grav: -1, life: 1.2 });
+      }
+      if (e.deadT > 1.8) m.root.visible = false;
       return;
     }
+    if (d.update && d.update(e, dt, API)) return;
     e.t += dt; e.flash = Math.max(0, e.flash - dt); e.cd -= dt;
     const dx = P.x - e.x, dz = P.z - e.z, dist = Math.hypot(dx, dz), toP = Math.atan2(dx, dz);
-    if (!e.engaged && dist < d.aggro && !P.dead) {
+    if (e.passive) { e.engaged = false; }
+    else if (!e.engaged && dist < d.aggro && !P.dead) {
       if (d.boss && e.type === 'tyrant' && Math.hypot(P.x - LOC.arena.x, P.z - LOC.arena.z) > LOC.arena.r - 2) { /* wait inside the arena */ }
       else {
         e.engaged = true;
@@ -955,7 +1386,7 @@
       if (ph === 'act' && a.def.lunge && !a.lunged) { a.lunged = true; e.vx = Math.sin(e.rot) * a.def.lunge; e.vz = Math.cos(e.rot) * a.def.lunge; }
       if (ph === 'act' && a.def.breath) {
         const hx = e.x + Math.sin(e.rot) * 9, hz = e.z + Math.cos(e.rot) * 9;
-        for (let i = 0; i < 4; i++) parts.push({ x: hx, y: e.y + 6, z: hz, vx: Math.sin(e.rot + rand(-0.3, 0.3)) * 22, vy: rand(-6, -2), vz: Math.cos(e.rot + rand(-0.3, 0.3)) * 22, life: 0.8, max: 0.8, r: 1, g: rand(0.4, 0.7), b: 0.1, grav: 0 });
+        for (let i = 0; i < 4; i++) parts.push({ x: hx, y: e.y + 6, z: hz, vx: Math.sin(e.rot + rand(-0.3, 0.3)) * 22, vy: rand(-6, -2), vz: Math.cos(e.rot + rand(-0.3, 0.3)) * 22, life: 0.8, max: 0.8, r: 3, g: rand(1.0, 1.8), b: 0.25, grav: 0, size: rand(0.8, 1.6) });
         e.rot += angDiff(e.rot, toP) * dt * 0.8;
         const pa = Math.atan2(P.x - hx, P.z - hz);
         a.tick = (a.tick || 0) - dt;
@@ -1013,25 +1444,31 @@
       if (a && a.def.name === 'sweep') { m.armR.rotation.z = act > 0 ? lerp(1.4, -1.4, act) : 1.4 * wind; m.armR.rotation.x = -1.4; } else m.armR.rotation.z = 0;
       m.g.position.y = a && a.def.name === 'leap' && act > 0 ? Math.sin(act * Math.PI) * 4 : 0;
       m.g.rotation.x = anim === 'stagger' ? -0.3 : a && act > 0 ? 0.2 : 0;
+      if (m.cape) m.cape.rotation.x = 0.12 + (anim === 'walk' ? 0.4 : 0) + Math.sin(t * 3 + e.wander) * 0.06;
     } else if (m.wingL) { // dragon
       const flap = Math.sin(t * (a && a.def.name === 'storm' ? 8 : 2)) * 0.5;
       m.wingL.rotation.z = flap + 0.2; m.wingR.rotation.z = -flap - 0.2;
       m.legs.forEach((l, i) => { l.rotation.x = anim === 'walk' ? Math.sin(t * 5 + i * Math.PI / 2) * 0.5 : 0; });
       m.neck.rotation.x = a && a.def.name === 'bite' ? (act > 0 ? lerp(-0.6, 0.6, act) : -0.6 * wind) : a && a.def.breath ? 0.35 : Math.sin(t) * 0.08;
       m.g.position.y = a && a.def.name === 'stomp' ? (act > 0 ? 0 : wind * 2.5) : 0;
-      m.tail.rotation.y = Math.sin(t * 1.5) * 0.4;
+      m.tail.rotation.y = Math.sin(t * 1.5) * 0.3; m.tail2.rotation.y = Math.sin(t * 1.5 - 0.6) * 0.35; m.tail3.rotation.y = Math.sin(t * 1.5 - 1.2) * 0.45;
+      m.jaw.rotation.x = a && (a.def.breath || a.def.name === 'bite') ? (a.def.breath ? 0.55 : (act > 0 ? 0.1 : wind * 0.6)) : 0.05 + Math.sin(t * 0.7) * 0.03;
     } else if (m.legs) { // wolf
       m.legs.forEach((l, i) => { l.rotation.x = anim === 'walk' || (a && act > 0) ? Math.sin(t * 14 + (i % 2) * Math.PI + (i > 1 ? 1 : 0)) * 0.8 : 0; });
       m.tail.rotation.x = 0.4 + Math.sin(t * 6) * 0.2; m.g.rotation.x = a ? (act > 0 ? 0.3 : -0.25 * wind) : 0;
     }
+    if (m.animate) m.animate(e, dt, anim, wind, act, API);
+    if (anim === 'idle' && m.head && !m.wingL) m.head.rotation.y = Math.sin(t * 0.6 + e.wander) * 0.45;
+    if (e.flash > 0 && m.g) m.g.rotation.x -= e.flash * 2.2;
+    if (anim === 'idle') m.root.position.y += Math.sin(t * 2.2 + e.wander) * 0.03;
     const fl = e.flash > 0;
     m.root.traverse((o) => { if (o.isMesh && o.material.emissive) { if (fl) o.material.emissive.setRGB(0.9, 0.9, 0.9); else if (o.userData.em) o.material.emissive.copy(o.userData.em); else { o.userData.em = o.material.emissive.clone(); } } });
     if (e.phase > 1 && Math.random() < 0.2) emit(e.x + rand(-2, 2), e.y + rand(1, 6), e.z + rand(-2, 2), 1, e.type === 'dragon' ? '#8ec5ff' : '#ff7043', { speed: 1, up: 2, grav: -1 });
   }
 
   /* ------------------------------------------------------------ grace / death / flow */
-  let state = 'play', fadeT = 0, curRegion = 'center';
-  const fogTarget = new T.Color(REGIONS.center.fog);
+  let state = 'play', fadeT = 0, curRegion = regionAt(P.x, P.z);
+  const fogTarget = new T.Color(REGIONS[curRegion].fog); regionFog.copy(fogTarget);
   /* world map with fast travel */
   let mapImg = null;
   function openMap() {
@@ -1149,11 +1586,42 @@
     camLook.set(P.x, gy + P.y + FORM[P.form].cam, P.z);
     if (input.lock && !input.lock.dead) camLook.lerp(new T.Vector3(input.lock.x, input.lock.y + (input.lock.d.boss ? 3 : 1), input.lock.z), 0.3);
     camera.lookAt(camLook);
-    sun.position.set(P.x + 40, gy + 80, P.z + 30); sun.target.position.set(P.x, gy, P.z);
   }
 
   /* ------------------------------------------------------------ main loop */
   let last = performance.now(), bot = { t: 0 };
+  const perf = { acc: 0, n: 0, last: performance.now(), max: pixelRatio };
+  /* sword trail ribbon (human form) */
+  const TRAIL_N = 16;
+  const trailPos = new Float32Array(TRAIL_N * 2 * 3), trailA = new Float32Array(TRAIL_N * 2), trail = [];
+  const trailGeo = new T.BufferGeometry();
+  trailGeo.setAttribute('position', new T.BufferAttribute(trailPos, 3)); trailGeo.setAttribute('alpha', new T.BufferAttribute(trailA, 1));
+  { const idx = []; for (let i = 0; i < TRAIL_N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } trailGeo.setIndex(idx); }
+  const trailMesh = new T.Mesh(trailGeo, new T.ShaderMaterial({ transparent: true, depthWrite: false, side: T.DoubleSide, blending: T.AdditiveBlending,
+    uniforms: { col: { value: new T.Color(1.4, 3.2, 3.6) } },
+    vertexShader: 'attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform vec3 col; varying float vA; void main(){ gl_FragColor = vec4(col * vA, 1.0); }' }));
+  trailMesh.frustumCulled = false; scene.add(trailMesh);
+  const tvA = new T.Vector3(), tvB = new T.Vector3();
+  function updateTrail(dt) {
+    for (const p of trail) p.age += dt;
+    while (trail.length && trail[0].age > 0.18) trail.shift();
+    if (P.form === 'human' && P.atk && human.root.visible) {
+      human.root.updateMatrixWorld(true);
+      tvA.set(0, -0.15, 0); human.sword.localToWorld(tvA); tvB.set(0, -1.6, 0); human.sword.localToWorld(tvB);
+      trail.push({ a: tvA.clone(), b: tvB.clone(), age: 0 });
+      if (trail.length > TRAIL_N) trail.shift();
+    }
+    const n = trail.length;
+    trailMesh.visible = n > 1;
+    if (n < 2) return;
+    for (let i = 0; i < TRAIL_N; i++) {
+      const p = trail[Math.min(i, n - 1)], k = i < n ? (1 - p.age / 0.18) * (i / n) : 0;
+      trailPos.set([p.a.x, p.a.y, p.a.z, p.b.x, p.b.y, p.b.z], i * 6);
+      trailA[i * 2] = k * 0.2; trailA[i * 2 + 1] = k;
+    }
+    trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.alpha.needsUpdate = true;
+  }
   function botInput(dt) {
     bot.t -= dt;
     const tgt = enemies.filter((e) => !e.dead).sort((a, b) => Math.hypot(a.x - P.x, a.z - P.z) - Math.hypot(b.x - P.x, b.z - P.z))[0];
@@ -1181,13 +1649,19 @@
       updateFx(dt);
       const rg = regionAt(P.x, P.z);
       if (rg !== curRegion) { curRegion = rg; bigMsg(REGIONS[rg].name, 'place', 3); fogTarget.set(REGIONS[rg].fog); }
-      scene.fog.color.lerp(fogTarget, Math.min(1, dt * 0.6));
+      regionFog.lerp(fogTarget, Math.min(1, dt * 0.6));
       graceObjs.forEach((g, i) => { if (!S.found[i] && Math.hypot(P.x - g.x, P.z - g.z) < 14) { S.found[i] = true; saveS(); toast('Luce di Grazia scoperta: ' + g.name); sfx('skillGet'); } });
       if (input.pressed.map) openMap();
       const gi = nearGrace();
       const pr = $('prompt');
-      if (gi >= 0) { pr.style.display = 'block'; pr.textContent = 'Riposa alla Luce di Grazia ✦'; if (input.pressed.interact) openGrace(gi); }
+      let act = gi >= 0 ? { label: 'Riposa alla Luce di Grazia ✦', action: () => openGrace(gi), d: 0 } : null;
+      for (const pl of plugins) if (pl.interactables) {
+        let list = []; try { list = pl.interactables() || []; } catch (err) { console.error(err); }
+        for (const it of list) { const d = Math.hypot(P.x - it.x, P.z - it.z); if (d < (it.r || 3) && (!act || d < act.d)) act = { label: it.label, action: it.action, d }; }
+      }
+      if (act) { pr.style.display = 'block'; if (pr.textContent !== act.label) pr.textContent = act.label; if (input.pressed.interact) act.action(); }
       else pr.style.display = 'none';
+      hook('update', dt);
       if (S.stain && Math.hypot(P.x - S.stain.x, P.z - S.stain.z) < 2) { S.runes += S.stain.runes; toast(`Anime recuperate: ${S.stain.runes.toLocaleString('it-IT')}`); S.stain = null; placeStain(); sfx('coin'); saveS(); }
       if (Math.random() < dt * 3) { const g = graceObjs[(Math.random() * graceObjs.length) | 0]; emit(g.x + rand(-0.5, 0.5), g.y + 1, g.z + rand(-0.5, 0.5), 1, '#ffd36b', { speed: 0.3, up: 1.5, grav: -0.5, life: 2 }); }
     } else if (state === 'dead') {
@@ -1198,13 +1672,31 @@
     }
     updateParticles(dt);
     updateCamera(Math.max(dt, 0.001));
+    {
+      const gy = heightAt(P.x, P.z);
+      windU.uTime.value += dt; windU.uPlayer.value.set(P.x, gy, P.z);
+      updateDay(dt, P.x, gy, P.z);
+      updateGrass(P.x, P.z);
+      updateWeather(dt, camera.position.x, camera.position.y, camera.position.z, curRegion);
+      updateTrail(dt);
+      const wantFov = (P.sprint && Math.hypot(P.vx, P.vz) > 9 ? 70 : 62) + (P.roll > 0 ? 3 : 0);
+      if (Math.abs(camera.fov - wantFov) > 0.05) { camera.fov = lerp(camera.fov, wantFov, Math.min(1, dt * 4)); camera.updateProjectionMatrix(); }
+      // adaptive resolution: keep the game fluid on weaker phones
+      perf.acc += (now - perf.last) / 1000; perf.last = now; perf.n++;
+      if (perf.acc > 3) {
+        const avg = perf.acc / perf.n; perf.acc = 0; perf.n = 0;
+        if (avg > 1 / 30 && pixelRatio > 0.7) { pixelRatio = Math.max(0.7, pixelRatio * 0.85); renderer.setPixelRatio(pixelRatio); onResize(); }
+        else if (avg < 1 / 55 && pixelRatio < perf.max) { pixelRatio = Math.min(perf.max, pixelRatio * 1.08); renderer.setPixelRatio(pixelRatio); onResize(); }
+      }
+    }
     graceObjs.forEach((g, i) => { g.mesh.rotation.y += dt * 1.5; g.mesh.position.y = g.y + 1.3 + Math.sin(now / 600 + i) * 0.15; });
     if (stainMesh) stainMesh.material.opacity = 0.6 + Math.sin(now / 200) * 0.3;
     if (fogWall.visible) fogWall.material.opacity = 0.14 + Math.sin(now / 300) * 0.05;
     if (toastT > 0) { toastT -= dt; if (toastT <= 0) $('toast').classList.remove('show'); }
     if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').classList.remove('show'); }
     hud();
-    renderer.render(scene, camera);
+    POST.comp.uniforms.hurt.value = Math.max(P.hitFlash * 3, P.hp > 0 && P.hp < P.maxHp * 0.25 ? 0.22 + 0.12 * Math.sin(now / 160) : 0);
+    POST.render(now / 1000);
     input.pressed = {};
     requestAnimationFrame(frame);
   }
@@ -1218,5 +1710,13 @@
   SK.events.on('gesture', () => { if (audioOn) return; audioOn = true; try { SK.Audio.init(); SK.Audio.setVolumes(main.settings.music, main.settings.sfx); music('forest'); } catch (e) { /* ignore */ } });
   window.addEventListener('pointerdown', function once() { SK.events.emit('gesture'); window.removeEventListener('pointerdown', once); });
   window.addEventListener('keydown', function once() { SK.events.emit('gesture'); window.removeEventListener('keydown', once); });
-  window.SK3D = { P, S, enemies, openMap, get state() { return state; } };
+  Object.assign(API, { P, S, enemies, openMap, DAY, transform, plugins, TYPES, FORM, FORM_NAMES, LOC, REGIONS, FLAT, COLL, MAPR, graceObjs,
+    scene, camera, renderer, T, main, ch, mythic, quality, input, windU, flashLight, emit, shockwave, bolt, strikeAt, spawn, hitEnemy, hitEnemyQuiet, killEnemy,
+    hurtPlayer, heightAt, regionAt, toast, bigMsg, sfx, music, saveS, recalc, castLightning, useStamina, mesh, part, pivot, cap, sph, coneG, std, lam, hdr, BOX,
+    humanoid, wolfModel, dragonModel, slime, human, wolfForm, body, dot, pointMat, populate, rand, lerp, clamp, angDiff, TAU,
+    get state() { return state; }, set state(v) { state = v; },
+    pressed: (id) => !!input.pressed[id], setShake: (v) => { shake = Math.max(shake, v); }, setHitstop: (v) => { hitstop = Math.max(hitstop, v); },
+    register(pl) { plugins.push(pl); try { if (pl.init) pl.init(API); if (pl.populate) pl.populate(); } catch (err) { console.error('[plugin init ' + pl.id + ']', err); } },
+    addButton, buttons, mapMarkers: [], compassMarkers: [] });
+  window.SK3D = API;
 })();
