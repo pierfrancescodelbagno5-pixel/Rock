@@ -1525,6 +1525,12 @@
       const a = e.atk; a.t += dt; anim = 'attack';
       const ph = a.t < a.def.windup ? 'wind' : a.t < a.def.windup + a.def.active ? 'act' : 'rec';
       if (ph === 'wind' && !a.def.breath) e.rot += angDiff(e.rot, toP) * Math.min(1, dt * (d.boss ? 3 : 6));
+      if (ph === 'wind' && !a.tell && a.t > a.def.windup * 0.45 && (d.boss || a.def.dmg >= 60)) {
+        a.tell = true;
+        const hx = e.x + Math.sin(e.rot) * d.r * 0.8, hz = e.z + Math.cos(e.rot) * d.r * 0.8, hy = e.y + (d.boss ? d.r * 2.2 : 2.4);
+        emit(hx, hy, hz, 10, '#ff3b2f', { speed: 2.5, grav: 0, life: 0.35, size: 0.9, bright: 3 });
+        emit(hx, hy, hz, 1, '#ffffff', { speed: 0, grav: 0, life: 0.25, size: d.boss ? 4 : 2, bright: 3 });
+      }
       if (ph === 'act' && a.def.lunge && !a.lunged) { a.lunged = true; e.vx = Math.sin(e.rot) * a.def.lunge; e.vz = Math.cos(e.rot) * a.def.lunge; }
       if (ph === 'act' && a.def.breath) {
         const hx = e.x + Math.sin(e.rot) * 9, hz = e.z + Math.cos(e.rot) * 9;
