@@ -18,7 +18,7 @@
   const KEY = 'slimeReborn.3d.v1';
   let S;
   try { S = JSON.parse(localStorage.getItem(KEY)); } catch (e) { S = null; }
-  S = Object.assign({ runes: 0, level: 1, vig: 10, end: 10, mnd: 10, str: 10, grace: 0, bosses: {}, flasks: 4, stain: null, essences: 0 }, S || {});
+  S = Object.assign({ runes: 0, level: 1, vig: 10, end: 10, mnd: 10, str: 10, grace: 0, bosses: {}, flasks: 4, stain: null, essences: 0, found: { 0: true } }, S || {});
   const saveS = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } };
   const mythic = ch.cls === 'pierfrancesco';
   const CLS = {
@@ -36,8 +36,8 @@
   $('view').appendChild(renderer.domElement);
   const scene = new T.Scene();
   const FOG = new T.Color('#b9a37a');
-  scene.fog = new T.Fog(FOG, 40, 210);
-  const camera = new T.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
+  scene.fog = new T.Fog(FOG, 50, quality === 'low' ? 200 : 270);
+  const camera = new T.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1600);
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
@@ -45,11 +45,11 @@
 
   // sky dome with vertex-colour gradient
   {
-    const g = new T.SphereGeometry(800, 24, 12);
+    const g = new T.SphereGeometry(1400, 24, 12);
     const cols = [], top = new T.Color('#5d6f9a'), mid = new T.Color('#e7c98f'), low = new T.Color('#b9a37a');
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
-      const h = p.getY(i) / 800, c = h > 0.15 ? mid.clone().lerp(top, Math.min(1, (h - 0.15) / 0.6)) : low.clone().lerp(mid, clamp((h + 0.1) / 0.25, 0, 1));
+      const h = p.getY(i) / 1400, c = h > 0.15 ? mid.clone().lerp(top, Math.min(1, (h - 0.15) / 0.6)) : low.clone().lerp(mid, clamp((h + 0.1) / 0.25, 0, 1));
       cols.push(c.r, c.g, c.b);
     }
     g.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
@@ -73,11 +73,22 @@
     return lerp(lerp(hash(xi, yi), hash(xi + 1, yi), u), lerp(hash(xi, yi + 1), hash(xi + 1, yi + 1), u), v);
   }
   const FLAT = []; // {x,z,r,h}
+  const MAPR = 720;
+  // regions of the open world
+  const REGIONS = {
+    center: { name: 'Pianure Dorate', ground: ['#7d8a3c', '#b59a4a'], crowns: ['#c9a23c', '#a8a03a', '#d8b04a', '#8f9a3a'], fog: '#b9a37a' },
+    north: { name: 'Vette Gelide', ground: ['#c9d3dc', '#9aa6b2'], crowns: ['#e8f0f6', '#cfdde6', '#b8c9d4'], fog: '#c3ccd6' },
+    east: { name: 'Terre Cremisi', ground: ['#7a3b2c', '#a8552f'], crowns: ['#b0301e', '#d0512a', '#8a2a1c'], fog: '#b07a5e' },
+    west: { name: 'Palude dei Sussurri', ground: ['#3e4a32', '#5a4a5e'], crowns: ['#4a5a2a', '#5e3f6a', '#3a4a3a'], fog: '#77806a' },
+  };
+  function regionAt(x, z) { return z < -280 ? 'north' : x > 260 ? 'east' : x < -260 ? 'west' : 'center'; }
   function rawH(x, z) {
     let h = 0, a = 1, f = 0.012;
     for (let i = 0; i < 4; i++) { h += (vnoise(x * f, z * f) - 0.5) * a; a *= 0.5; f *= 2.1; }
     const d = Math.hypot(x, z);
-    return h * 16 + Math.max(0, d - 230) * 0.35; // hills rise at the map edge
+    let m = Math.max(0, -z - 300) * 0.09 * (0.6 + vnoise(x * 0.01, z * 0.01)); // northern mountains
+    if (x < -260) m -= Math.min(4, (-x - 260) * 0.02); // sunken swamp
+    return h * 16 + m + Math.max(0, d - (MAPR - 70)) * 0.5; // hills rise at the map edge
   }
   function heightAt(x, z) {
     let h = rawH(x, z);
@@ -88,17 +99,26 @@
     return h;
   }
   const LOC = {
-    grace: [{ x: 0, z: 6, name: 'Rovine del Risveglio' }, { x: 78, z: 52, name: 'Chiesa della Gelatina' }, { x: 0, z: -96, name: 'Soglia del Tiranno' }, { x: -110, z: -40, name: 'Lago della Tempesta' }],
+    grace: [{ x: 0, z: 6, name: 'Rovine del Risveglio' }, { x: 78, z: 52, name: 'Chiesa della Gelatina' }, { x: -150, z: 140, name: 'Crocevia Dorato' },
+      { x: 330, z: -40, name: 'Accampamento Cremisi' }, { x: 430, z: -175, name: 'Soglia del Tiranno' }, { x: -390, z: 70, name: 'Palude dei Sussurri' },
+      { x: -60, z: -340, name: 'Passo Gelido' }, { x: -120, z: -520, name: 'Vetta della Tempesta' }, { x: 180, z: 300, name: 'Colline del Tramonto' }],
     camp: { x: 42, z: -28 }, wolves: { x: -58, z: 24 }, ruins: { x: 86, z: 66 },
-    arena: { x: 0, z: -140, r: 24 }, dragon: { x: -140, z: -70 },
+    arena: { x: 430, z: -230, r: 24 }, dragon: { x: -120, z: -590 },
+    camps: [
+      { x: -170, z: 60, t: 'wolf', n: 5 }, { x: 140, z: 160, t: 'soldier', n: 6 }, { x: 240, z: 330, t: 'knight', n: 3 }, { x: -60, z: 230, t: 'soldier', n: 5 },
+      { x: 360, z: 40, t: 'soldier', n: 7 }, { x: 470, z: -60, t: 'knight', n: 4 }, { x: 560, z: 120, t: 'wolf', n: 5 }, { x: 380, z: -120, t: 'soldier', n: 6 },
+      { x: -420, z: -20, t: 'wolf', n: 6 }, { x: -480, z: 180, t: 'knight', n: 3 }, { x: -330, z: 260, t: 'soldier', n: 6 },
+      { x: 60, z: -380, t: 'wolf', n: 6 }, { x: -200, z: -420, t: 'knight', n: 3 }, { x: 40, z: -520, t: 'soldier', n: 5 },
+    ],
   };
   for (const g of LOC.grace) FLAT.push({ x: g.x, z: g.z, r: 6, h: rawH(g.x, g.z) });
   FLAT.push({ x: LOC.arena.x, z: LOC.arena.z, r: LOC.arena.r + 4, h: rawH(LOC.arena.x, LOC.arena.z) });
   FLAT.push({ x: LOC.dragon.x, z: LOC.dragon.z, r: 30, h: rawH(LOC.dragon.x, LOC.dragon.z) - 1 });
   FLAT.push({ x: LOC.camp.x, z: LOC.camp.z, r: 12, h: rawH(LOC.camp.x, LOC.camp.z) });
-  const MAPR = 300;
+  for (const c of LOC.camps) FLAT.push({ x: c.x, z: c.z, r: 10, h: rawH(c.x, c.z) });
   {
-    const g = new T.PlaneGeometry(MAPR * 2.4, MAPR * 2.4, 150, 150);
+    const seg = quality === 'low' ? 170 : 240;
+    const g = new T.PlaneGeometry(MAPR * 2.3, MAPR * 2.3, seg, seg);
     g.rotateX(-Math.PI / 2);
     const p = g.attributes.position, cols = [];
     const grass = new T.Color('#7d8a3c'), gold = new T.Color('#b59a4a'), rock = new T.Color('#7a7064'), dirt = new T.Color('#6e5a3a');
@@ -106,7 +126,8 @@
       const x = p.getX(i), z = p.getZ(i), h = heightAt(x, z);
       p.setY(i, h);
       const n = vnoise(x * 0.05, z * 0.05);
-      let c = grass.clone().lerp(gold, n);
+      const R = REGIONS[regionAt(x + (vnoise(x * 0.02, z * 0.02) - 0.5) * 100, z + (vnoise(z * 0.02, x * 0.02) - 0.5) * 100)];
+      let c = new T.Color(R.ground[0]).lerp(new T.Color(R.ground[1]), n);
       if (h > 9) c.lerp(rock, clamp((h - 9) / 8, 0, 1));
       if (n < 0.25) c.lerp(dirt, 0.5);
       cols.push(c.r, c.g, c.b);
@@ -151,14 +172,14 @@
   }
   {
     const trunks = [], crowns = [], rocks = [];
-    scatter(quality === 'low' ? 140 : 260, (x, z) => {
+    scatter(quality === 'low' ? 600 : 1100, (x, z) => {
       const y = heightAt(x, z), s = rand(0.8, 1.6);
       trunks.push({ x, y: y + 2.2 * s, z, sx: s, sy: s, sz: s, ry: rand(0, 6) });
-      crowns.push({ x, y: y + 5.2 * s, z, sx: s * rand(0.9, 1.3), sy: s * rand(0.8, 1.2), sz: s * rand(0.9, 1.3), ry: rand(0, 6), c: ['#c9a23c', '#a8a03a', '#d8b04a', '#8f9a3a'][(Math.random() * 4) | 0] });
+      crowns.push({ x, y: y + 5.2 * s, z, sx: s * rand(0.9, 1.3), sy: s * rand(0.8, 1.2), sz: s * rand(0.9, 1.3), ry: rand(0, 6), c: ((cs) => cs[(Math.random() * cs.length) | 0])(REGIONS[regionAt(x, z)].crowns) });
       COLL.push({ x, z, r: 0.7 * s });
       return true;
     });
-    scatter(quality === 'low' ? 90 : 170, (x, z) => {
+    scatter(quality === 'low' ? 350 : 650, (x, z) => {
       const s = rand(0.6, 2.6);
       rocks.push({ x, y: heightAt(x, z) + s * 0.4, z, sx: s, sy: s * rand(0.6, 1.1), sz: s * rand(0.8, 1.3), rx: rand(0, 1), ry: rand(0, 6) });
       COLL.push({ x, z, r: s * 0.9 });
@@ -400,8 +421,8 @@
     for (let i = 0; i < 7; i++) spawn('soldier', LOC.camp.x + rand(-9, 9), LOC.camp.z + rand(-9, 9));
     for (let i = 0; i < 5; i++) spawn('wolf', LOC.wolves.x + rand(-10, 10), LOC.wolves.z + rand(-10, 10));
     for (let i = 0; i < 3; i++) spawn('knight', LOC.ruins.x + rand(-6, 6), LOC.ruins.z + rand(-6, 6));
-    for (let i = 0; i < 10; i++) { const a = rand(0, TAU), r = rand(30, 230); spawn(Math.random() < 0.5 ? 'soldier' : 'wolf', Math.cos(a) * r, Math.sin(a) * r); }
-    for (let i = 0; i < 4; i++) spawn('soldier', rand(-10, 10), -70 + rand(-8, 8));
+    for (const c of LOC.camps) for (let i = 0; i < c.n; i++) spawn(c.t, c.x + rand(-9, 9), c.z + rand(-9, 9));
+    for (let i = 0; i < 40; i++) { const a = rand(0, TAU), r = rand(40, MAPR - 80); spawn(Math.random() < 0.55 ? 'soldier' : 'wolf', Math.cos(a) * r, Math.sin(a) * r); }
     if (!S.bosses.tyrant) spawn('tyrant', LOC.arena.x, LOC.arena.z - 8, { rot: 0 });
     if (!S.bosses.dragon) spawn('dragon', LOC.dragon.x, LOC.dragon.z, { rot: 0 });
   }
@@ -471,7 +492,7 @@
   /* ------------------------------------------------------------ input */
   const input = { mx: 0, mz: 0, keys: {}, pressed: {}, yaw: Math.PI, pitch: 0.35, lock: null };
   const press = (k) => { input.pressed[k] = true; };
-  const KEYS = { KeyJ: 'light', KeyK: 'heavy', Space: 'roll', KeyQ: 'lock', KeyR: 'flask', KeyE: 'interact', KeyF: 'skill', KeyG: 'absorb', Escape: 'pause', KeyP: 'pause' };
+  const KEYS = { ShiftLeft: 'run', KeyM: 'map', KeyJ: 'light', KeyK: 'heavy', Space: 'roll', KeyQ: 'lock', KeyR: 'flask', KeyE: 'interact', KeyF: 'skill', KeyG: 'absorb', Escape: 'pause', KeyP: 'pause' };
   window.addEventListener('keydown', (e) => {
     try { SK.Audio.init(); SK.Audio.resume(); } catch (er) { /* ignore */ }
     input.keys[e.code] = true;
@@ -508,7 +529,7 @@
   // on-screen buttons
   const touchEl = $('touch');
   const BTN = [['light', 'Attacco', 66, 96, 34, 'big'], ['heavy', 'Colpo<br>pesante', 140, 60, 26], ['roll', 'Schiva', 140, 140, 28],
-    ['skill', 'Fulmine<br>Nero', 66, 178, 24], ['absorb', 'Preda-<br>tore', 214, 104, 24], ['flask', 'Cura', 28, 252, 21], ['lock', 'Mira', 214, 178, 21]];
+    ['skill', 'Fulmine<br>Nero', 66, 178, 24], ['absorb', 'Preda-<br>tore', 214, 104, 24], ['flask', 'Cura', 28, 252, 21], ['lock', 'Mira', 214, 178, 21], ['run', 'Corri', 214, 36, 21]];
   for (const [k, label, rx, by, r, cls] of BTN) {
     const b = document.createElement('div');
     b.className = 'tbtn' + (cls ? ' ' + cls : '');
@@ -521,6 +542,11 @@
   }
   {
     const b = document.createElement('div');
+    const mb = document.createElement('div');
+    mb.className = 'tbtn'; mb.innerHTML = 'Mappa';
+    Object.assign(mb.style, { width: '48px', height: '48px', right: 'calc(64px + env(safe-area-inset-right))', top: '8px' });
+    mb.addEventListener('pointerdown', (e) => { e.stopPropagation(); press('map'); });
+    touchEl.appendChild(mb);
     b.className = 'tbtn'; b.innerHTML = '❚❚';
     Object.assign(b.style, { width: '40px', height: '40px', right: 'calc(14px + env(safe-area-inset-right))', top: '12px' });
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); press('pause'); });
@@ -732,6 +758,7 @@
       if (pr.flask) drinkFlask();
     }
     if (pr.lock) toggleLock();
+    if (pr.run) { P.sprint = !P.sprint; toast(P.sprint ? 'Corsa attivata' : 'Corsa disattivata'); }
 
     if (P.roll > 0) {
       P.roll -= dt; P.vx *= 1 - dt * 2.2; P.vz *= 1 - dt * 2.2;
@@ -744,7 +771,9 @@
     } else if (P.stun > 0) {
       P.vx *= 1 - dt * 6; P.vz *= 1 - dt * 6;
     } else {
-      const sp = 7 * (P.absorb > 0 ? 0.5 : 1) * (mythic ? 1.25 : 1);
+      const running = P.sprint && P.st > 1 && moveAmt > 0.3;
+      if (running) { P.st -= dt * 9; P.stCd = 0.5; if (Math.random() < dt * 20) emit(P.x, heightAt(P.x, P.z) + 0.2, P.z, 1, '#d8c39a', { speed: 1.5, up: 1 }); }
+      const sp = 7 * (P.absorb > 0 ? 0.5 : 1) * (mythic ? 1.25 : 1) * (running ? 1.85 : 1);
       P.vx = lerp(P.vx, wx * sp * moveAmt, dt * 10); P.vz = lerp(P.vz, wz * sp * moveAmt, dt * 10);
       if (moveAmt > 0.1) {
         const target = input.lock && !input.lock.dead ? Math.atan2(input.lock.x - P.x, input.lock.z - P.z) : Math.atan2(wx, wz);
@@ -924,7 +953,53 @@
   }
 
   /* ------------------------------------------------------------ grace / death / flow */
-  let state = 'play', fadeT = 0;
+  let state = 'play', fadeT = 0, curRegion = 'center';
+  const fogTarget = new T.Color(REGIONS.center.fog);
+  /* world map with fast travel */
+  let mapImg = null;
+  function openMap() {
+    state = 'menu';
+    let panel = $('mapp');
+    if (!panel) {
+      panel = document.createElement('div'); panel.className = 'panel'; panel.id = 'mapp';
+      panel.innerHTML = '<div class="box" style="padding:10px;text-align:center"><canvas id="mapc" width="512" height="512" style="width:min(78vh,86vw);height:min(78vh,86vw);display:block;margin:auto;touch-action:none"></canvas><div class="muted" id="mapinfo">Tocca una Luce di Grazia scoperta per viaggiare</div><button id="mapx">Chiudi</button></div>';
+      document.body.appendChild(panel);
+      $('mapx').addEventListener('click', () => { panel.classList.remove('open'); state = 'play'; });
+      $('mapc').addEventListener('pointerdown', (ev) => {
+        const r = ev.target.getBoundingClientRect(), mx = (ev.clientX - r.left) / r.width * 2 - 1, mz = (ev.clientY - r.top) / r.height * 2 - 1;
+        const wx = mx * MAPR, wz = mz * MAPR;
+        const i = graceObjs.findIndex((g, k) => S.found[k] && Math.hypot(g.x - wx, g.z - wz) < 40);
+        if (i < 0) return;
+        if (enemies.some((e) => e.d.boss && e.engaged && !e.dead)) { $('mapinfo').textContent = 'Non puoi viaggiare durante uno scontro!'; return; }
+        panel.classList.remove('open');
+        $('fade').style.opacity = 1;
+        setTimeout(() => { S.grace = i; P.x = graceObjs[i].x; P.z = graceObjs[i].z + 3; P.vx = P.vz = 0; camPos.set(P.x, heightAt(P.x, P.z) + 6, P.z + 10); saveS(); state = 'play'; $('fade').style.opacity = 0; bigMsg(graceObjs[i].name, 'place', 2.5); }, 900);
+      });
+    }
+    const c = $('mapc'), x = c.getContext('2d');
+    if (!mapImg) {
+      mapImg = x.createImageData(128, 128);
+      for (let j = 0; j < 128; j++) for (let i = 0; i < 128; i++) {
+        const wx = (i / 64 - 1) * MAPR, wz = (j / 64 - 1) * MAPR, h = rawH(wx, wz), R = REGIONS[regionAt(wx, wz)];
+        const col = new T.Color(R.ground[0]).lerp(new T.Color('#ffffff'), clamp(h / 60, 0, 0.5)).lerp(new T.Color('#000000'), Math.hypot(wx, wz) > MAPR - 20 ? 0.7 : 0);
+        const o = (j * 128 + i) * 4; mapImg.data[o] = col.r * 255; mapImg.data[o + 1] = col.g * 255; mapImg.data[o + 2] = col.b * 255; mapImg.data[o + 3] = 255;
+      }
+    }
+    const tmp = document.createElement('canvas'); tmp.width = tmp.height = 128; tmp.getContext('2d').putImageData(mapImg, 0, 0);
+    x.imageSmoothingEnabled = true; x.drawImage(tmp, 0, 0, 512, 512);
+    const W = (v) => (v / MAPR + 1) * 256;
+    x.font = '13px Georgia'; x.textAlign = 'center';
+    for (const k of Object.keys(REGIONS)) {
+      const pos = { center: [0, 60], north: [0, -500], east: [480, 0], west: [-480, 0] }[k];
+      x.fillStyle = 'rgba(255,240,200,.75)'; x.fillText(REGIONS[k].name, W(pos[0]), W(pos[1]));
+    }
+    graceObjs.forEach((g, i) => { if (!S.found[i]) return; x.fillStyle = '#ffd36b'; x.beginPath(); x.arc(W(g.x), W(g.z), 7, 0, TAU); x.fill(); x.fillStyle = '#fff'; x.fillText(g.name, W(g.x), W(g.z) - 11); });
+    for (const [k, l] of [['tyrant', LOC.arena], ['dragon', LOC.dragon]]) if (!S.bosses[k]) { x.fillStyle = '#c62828'; x.font = '20px Georgia'; x.fillText('☠', W(l.x), W(l.z) + 7); x.font = '13px Georgia'; }
+    if (S.stain) { x.fillStyle = '#7dffb0'; x.beginPath(); x.arc(W(S.stain.x), W(S.stain.z), 5, 0, TAU); x.fill(); }
+    x.save(); x.translate(W(P.x), W(P.z)); x.rotate(-P.rot + Math.PI); x.fillStyle = '#4fc3ff'; x.strokeStyle = '#fff'; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(0, -10); x.lineTo(7, 8); x.lineTo(-7, 8); x.closePath(); x.fill(); x.stroke(); x.restore();
+    panel.classList.add('open');
+  }
   function nearGrace() { for (let i = 0; i < graceObjs.length; i++) if (Math.hypot(P.x - graceObjs[i].x, P.z - graceObjs[i].z) < 3.2) return i; return -1; }
   const LVCOST = () => Math.round(300 + Math.pow(S.level, 1.8) * 40);
   function openGrace(i) {
@@ -968,7 +1043,7 @@
     const box = $('pause').querySelector('.box');
     box.innerHTML = `<h2>Terre Spezzate</h2>
       <div class="muted">Sinistra: muoviti · Destra: trascina per girare la visuale<br>Attacco / Colpo pesante · Schiva (invulnerabile) · Mira (aggancia)<br>
-      Fulmine Nero (FP) · Predatore (divora i nemici indeboliti) · Cura (Gelatina Cremisi)<br>Tastiera: WASD, J/K, Spazio, Q, F, G, R, E, frecce<br>
+      Corri (consuma stamina) · Mappa: viaggio rapido tra le Luci di Grazia scoperte<br>Fulmine Nero (FP) · Predatore (divora i nemici indeboliti) · Cura (Gelatina Cremisi)<br>Tastiera: WASD, J/K, Spazio, Q, F, G, R, E, frecce<br>
       Riposa alle Luci di Grazia ✦ per salire di livello. Se cadi perdi le anime: recuperale dalla macchia verde.</div>
       <button id="p-go">Riprendi</button><button id="p-menu">Torna al Regno (menu principale)</button>`;
     $('p-go').addEventListener('click', () => { $('pause').classList.remove('open'); state = 'play'; });
@@ -1021,8 +1096,17 @@
     if (state === 'play') {
       if (input.pressed.pause) openPause();
       updatePlayer(dt);
-      for (const e of enemies) updateEnemy(e, dt);
+      for (const e of enemies) {
+        const far = !e.engaged && Math.hypot(e.x - P.x, e.z - P.z) > 130;
+        if (far) { e.model.root.visible = false; if (e.bar) e.bar.bg.visible = e.bar.fg.visible = false; }
+        else { if (!e.dead) e.model.root.visible = true; updateEnemy(e, dt); }
+      }
       updateFx(dt);
+      const rg = regionAt(P.x, P.z);
+      if (rg !== curRegion) { curRegion = rg; bigMsg(REGIONS[rg].name, 'place', 3); fogTarget.set(REGIONS[rg].fog); }
+      scene.fog.color.lerp(fogTarget, Math.min(1, dt * 0.6));
+      graceObjs.forEach((g, i) => { if (!S.found[i] && Math.hypot(P.x - g.x, P.z - g.z) < 14) { S.found[i] = true; saveS(); toast('Luce di Grazia scoperta: ' + g.name); sfx('skillGet'); } });
+      if (input.pressed.map) openMap();
       const gi = nearGrace();
       const pr = $('prompt');
       if (gi >= 0) { pr.style.display = 'block'; pr.textContent = 'Riposa alla Luce di Grazia ✦'; if (input.pressed.interact) openGrace(gi); }
@@ -1057,5 +1141,5 @@
   SK.events.on('gesture', () => { if (audioOn) return; audioOn = true; try { SK.Audio.init(); SK.Audio.setVolumes(main.settings.music, main.settings.sfx); music('forest'); } catch (e) { /* ignore */ } });
   window.addEventListener('pointerdown', function once() { SK.events.emit('gesture'); window.removeEventListener('pointerdown', once); });
   window.addEventListener('keydown', function once() { SK.events.emit('gesture'); window.removeEventListener('keydown', once); });
-  window.SK3D = { P, S, enemies, get state() { return state; } };
+  window.SK3D = { P, S, enemies, openMap, get state() { return state; } };
 })();

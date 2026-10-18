@@ -12,7 +12,7 @@ Scarica **[SlimeReborn.apk](SlimeReborn.apk)** sul telefono e aprilo (consenti "
 - Grafica, musica ed effetti generati interamente dal codice
 
 ## Terre Spezzate 3D
-Modalità action-RPG 3D low-poly (dal menu: **Terre Spezzate 3D**): mondo aperto, Luci di Grazia per riposare e salire di livello, schivata con stamina, aggancio del bersaglio, Fulmine Nero, Predatore, anime perse alla morte da recuperare, due boss (Gorvan il Tiranno Caduto e il Drago della Tempesta Antica).
+Modalità action-RPG 3D low-poly (dal menu: **Terre Spezzate 3D**): **mondo aperto** di ~1,4 km con 4 regioni (Pianure Dorate, Vette Gelide, Terre Cremisi, Palude dei Sussurri), 9 Luci di Grazia da scoprire, mappa con viaggio rapido, corsa, 14 accampamenti nemici, Luci di Grazia per riposare e salire di livello, schivata con stamina, aggancio del bersaglio, Fulmine Nero, Predatore, anime perse alla morte da recuperare, due boss (Gorvan il Tiranno Caduto e il Drago della Tempesta Antica).
 
 ## Comandi
 Touch: joystick a sinistra, pulsanti a destra (Predatore, Scatto, 3 abilità). Tastiera: WASD, Spazio, E, 1/2/3, F, Esc.
