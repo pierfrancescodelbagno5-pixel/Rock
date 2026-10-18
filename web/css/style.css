@@ -662,3 +662,14 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .sk-logo-float, .sk-title, .sk-logo, .sk-lvcard::before, .sk-victory-bg { animation: none !important; }
 }
+
+/* ======================================================= late additions */
+.sk-dice span { display: inline-block; font-size: 1.15em; line-height: 1; }
+.sk-dice.spin span { animation: skDiceSpin 0.5s cubic-bezier(.2, 1.4, .4, 1); }
+@keyframes skDiceSpin { from { transform: rotate(-360deg) scale(0.6); } to { transform: none; } }
+.sk-toast.bump { animation: skPop 0.3s cubic-bezier(.3, 1.8, .5, 1); }
+.sk-naming .sk-gold-text { margin: 0; }
+.sk-levelup .sk-lvhead .sk-title.gold { filter: drop-shadow(0 0 12px rgba(255, 179, 0, 0.45)); }
+#ui.q-low .sk-levelup .sk-lvhead .sk-title.gold { filter: none; }
+@media (max-width: 700px) { .sk-lvcards { gap: 8px; } .sk-lvcard { flex-basis: 170px; } .sk-lvcard .tt { font-size: 0.95em; } }
+@media (max-height: 380px) { .sk-oracle { top: calc(var(--sat) + 58px); } #ui.boss-on .sk-oracle { top: calc(var(--sat) + 84px); } }
