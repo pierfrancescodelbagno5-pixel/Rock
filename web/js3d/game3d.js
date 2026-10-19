@@ -34,7 +34,7 @@
   const quality = main.settings.quality || 'high';
   const renderer = new T.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   const isGL2 = renderer.capabilities.isWebGL2;
-  let pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'low' ? 1 : quality === 'medium' ? 1.25 : 1.6);
+  let pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'low' ? 1 : quality === 'medium' ? 1.25 : 2);
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = quality !== 'low';
@@ -42,7 +42,7 @@
   renderer.toneMapping = T.ACESFilmicToneMapping; // only used when post-processing is off
   $('view').appendChild(renderer.domElement);
   const scene = new T.Scene();
-  scene.fog = new T.Fog(new T.Color('#b9a37a'), 55, quality === 'low' ? 210 : 310);
+  scene.fog = new T.FogExp2(new T.Color('#b9a37a'), quality === 'low' ? 0.0078 : 0.0052);
   const camera = new T.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2400);
   const VS_FS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
   const POST = (() => {
@@ -59,11 +59,16 @@
       's += (texture2D(tex, vUv + dir * 1.385).rgb + texture2D(tex, vUv - dir * 1.385).rgb) * 0.316;' +
       's += (texture2D(tex, vUv + dir * 3.231).rgb + texture2D(tex, vUv - dir * 3.231).rgb) * 0.070; gl_FragColor = vec4(s, 1.0); }',
       { tex: { value: null }, dir: { value: new T.Vector2() } });
-    const comp = sm(`uniform sampler2D tex, b1, b2; uniform float strength, exposure, vig, hurt, time, sat; uniform vec3 tint; varying vec2 vUv;
+    const comp = sm(`uniform sampler2D tex, b1, b2; uniform float strength, exposure, vig, hurt, time, sat, rays; uniform vec2 sunPos; uniform vec3 tint; varying vec2 vUv;
       vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
       void main(){
         vec3 c = texture2D(tex, vUv).rgb;
         c += (texture2D(b1, vUv).rgb * 0.8 + texture2D(b2, vUv).rgb * 1.4) * strength;
+        if (rays > 0.001) {
+          vec2 dlt = (vUv - sunPos) / 28.0; vec2 cu = vUv; float dec = 1.0; vec3 acc = vec3(0.0);
+          for (int i = 0; i < 28; i++) { cu -= dlt; acc += texture2D(b2, cu).rgb * dec; dec *= 0.94; }
+          c += acc * rays * 0.06;
+        }
         c = aces(c * tint * exposure);
         float l = dot(c, vec3(0.299, 0.587, 0.114)); c = mix(vec3(l), c, sat);
         vec2 q = vUv - 0.5; c *= 1.0 - dot(q, q) * vig * 2.4;
@@ -72,7 +77,7 @@
         c += (fract(sin(dot(vUv * 913.0 + time, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
         gl_FragColor = vec4(c, 1.0); }`,
       { tex: { value: null }, b1: { value: null }, b2: { value: null }, strength: { value: 0.6 }, exposure: { value: 1 }, vig: { value: 0.38 },
-        tint: { value: new T.Color(1, 1, 1) }, hurt: { value: 0 }, time: { value: 0 }, sat: { value: 1.1 } });
+        tint: { value: new T.Color(1, 1, 1) }, hurt: { value: 0 }, time: { value: 0 }, sat: { value: 1.1 }, rays: { value: 0 }, sunPos: { value: new T.Vector2(0.5, 0.8) } });
     function size() {
       if (!enabled) return;
       const pr = renderer.getPixelRatio(), w = Math.floor(window.innerWidth * pr), h = Math.floor(window.innerHeight * pr);
@@ -143,9 +148,9 @@
   const hemi = new T.HemisphereLight('#ffe9c0', '#3a3020', 1.0); scene.add(hemi);
   const sun = new T.DirectionalLight('#ffd9a0', 2.4);
   sun.castShadow = renderer.shadowMap.enabled;
-  sun.shadow.mapSize.set(quality === 'high' ? 2048 : 1024, quality === 'high' ? 2048 : 1024);
+  sun.shadow.mapSize.set(quality === 'high' ? 4096 : 1024, quality === 'high' ? 4096 : 1024);
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
-  Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 300 });
+  Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, near: 1, far: 320 });
   scene.add(sun, sun.target);
   const flashLight = new T.PointLight('#b388ff', 0, 34, 1.6);
   scene.add(flashLight);
@@ -160,7 +165,7 @@
     sunDay: C('#fff1d0'), sunDusk: C('#ff9a50'),
   };
   const regionFog = new T.Color('#b9a37a');
-  const tmpA = new T.Color(), tmpB = new T.Color(), sunV = new T.Vector3();
+  const tmpA = new T.Color(), tmpB = new T.Color(), sunV = new T.Vector3(), sunScr = new T.Vector3();
   const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   let nightAmt = 0;
   function updateDay(dt, cx, cy, cz) {
@@ -188,6 +193,14 @@
     hemi.intensity = 0.25 + 0.5 * day; hemi.color.copy(tmpB).lerp(C('#ffffff'), 0.3); hemi.groundColor.set(nightAmt > 0.5 ? '#141820' : '#3a3020');
     POST.comp.uniforms.tint.value.setRGB(1 - nightAmt * 0.25, 1 - nightAmt * 0.12, 1 + nightAmt * 0.1);
     POST.comp.uniforms.exposure.value = 0.88 + nightAmt * 0.4;
+    { // screen-space god rays toward the sun
+      const sp = sunScr.copy(sunV).multiplyScalar(1500).add(camera.position).project(camera);
+      const vis = sp.z < 1 && Math.abs(sp.x) < 1.8 && Math.abs(sp.y) < 1.8 ? 1 : 0;
+      POST.comp.uniforms.sunPos.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
+      const want = quality === 'high' ? vis * day * 0.9 : quality === 'medium' ? vis * day * 0.5 : 0;
+      POST.comp.uniforms.rays.value = lerp(POST.comp.uniforms.rays.value, want, Math.min(1, dt * 3 + 0.02));
+      if (API.waterNormal) { API.waterNormal.offset.x += dt * 0.015; API.waterNormal.offset.y += dt * 0.01; }
+    }
     sky.position.set(cx, cy, cz);
     for (const s of clouds) {
       const u = s.userData; u.a += u.v * dt * 0.05;
@@ -282,7 +295,7 @@
   }
   const hdr = (hex, k) => new T.Color(hex).multiplyScalar(k);
   {
-    const seg = quality === 'low' ? 170 : 250;
+    const seg = quality === 'low' ? 170 : quality === 'medium' ? 260 : 340;
     const g = new T.PlaneGeometry(MAPR * 2.3, MAPR * 2.3, seg, seg);
     g.rotateX(-Math.PI / 2);
     const p = g.attributes.position, cols = [];
@@ -301,12 +314,46 @@
     }
     g.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
     g.computeVertexNormals();
-    const m = new T.Mesh(g, new T.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+    const detail = (() => {
+      // procedural ground detail: albedo grain + derived normal map (tileable value noise)
+      const N = 256, cv = document.createElement('canvas'), nv = document.createElement('canvas');
+      cv.width = cv.height = nv.width = nv.height = N;
+      const cx = cv.getContext('2d'), nx = nv.getContext('2d'), a = cx.createImageData(N, N), b = nx.createImageData(N, N), H = new Float32Array(N * N);
+      const tn = (x, y, f) => { // tileable noise
+        const X = x * f, Y = y * f, xi = Math.floor(X), yi = Math.floor(Y), xf = X - xi, yf = Y - yi, w = f;
+        const hh = (i, j) => hash(((i % w) + w) % w, ((j % w) + w) % w);
+        const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+        return lerp(lerp(hh(xi, yi), hh(xi + 1, yi), u), lerp(hh(xi, yi + 1), hh(xi + 1, yi + 1), u), v);
+      };
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const u = x / N, v = y / N;
+        const h = tn(u, v, 8) * 0.45 + tn(u, v, 32) * 0.35 + tn(u, v, 64) * 0.2;
+        H[y * N + x] = h;
+        const g = 0.78 + h * 0.34 + (hash(x, y) - 0.5) * 0.08;
+        const o = (y * N + x) * 4; a.data[o] = a.data[o + 1] = a.data[o + 2] = Math.min(255, g * 230); a.data[o + 3] = 255;
+      }
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const hx = H[y * N + ((x + 1) % N)] - H[y * N + ((x - 1 + N) % N)], hy = H[((y + 1) % N) * N + x] - H[((y - 1 + N) % N) * N + x];
+        const nx0 = -hx * 3.2, ny0 = -hy * 3.2, nz0 = 1, l = Math.hypot(nx0, ny0, nz0), o = (y * N + x) * 4;
+        b.data[o] = (nx0 / l * 0.5 + 0.5) * 255; b.data[o + 1] = (ny0 / l * 0.5 + 0.5) * 255; b.data[o + 2] = (nz0 / l * 0.5 + 0.5) * 255; b.data[o + 3] = 255;
+      }
+      cx.putImageData(a, 0, 0); nx.putImageData(b, 0, 0);
+      const t1 = new T.CanvasTexture(cv), t2 = new T.CanvasTexture(nv);
+      for (const t of [t1, t2]) { t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(260, 260); t.anisotropy = 4; }
+      t1.colorSpace = T.SRGBColorSpace;
+      return { map: t1, normal: t2 };
+    })();
+    const terrainMat = quality === 'low'
+      ? new T.MeshLambertMaterial({ vertexColors: true, flatShading: true })
+      : new T.MeshStandardMaterial({ vertexColors: true, map: detail.map, normalMap: detail.normal, normalScale: new T.Vector2(0.9, 0.9), roughness: 0.94, metalness: 0, envMapIntensity: 0.35 });
+    const m = new T.Mesh(g, terrainMat);
     m.receiveShadow = true;
     scene.add(m);
     // water: storm lake (north) and swamp pools (west), reflecting the sky
+    const WATERN = detail.normal.clone(); WATERN.repeat.set(6, 6); WATERN.needsUpdate = true; API.waterNormal = WATERN;
     const water = (x, z, r, col) => {
-      const w = new T.Mesh(new T.CircleGeometry(r, 40), new T.MeshStandardMaterial({ color: col, roughness: 0.06, metalness: 0.45, transparent: true, opacity: 0.86, envMapIntensity: 1.4 }));
+      const w = new T.Mesh(new T.CircleGeometry(r, 48), new T.MeshStandardMaterial({ color: col, roughness: 0.05, metalness: 0.5, transparent: true, opacity: 0.88, envMapIntensity: 1.6,
+        normalMap: WATERN, normalScale: new T.Vector2(0.35, 0.35) }));
       w.rotation.x = -Math.PI / 2; w.position.set(x, heightAt(x, z) + 0.18, z); w.receiveShadow = true; scene.add(w);
       return w;
     };

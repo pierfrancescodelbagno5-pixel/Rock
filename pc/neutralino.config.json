@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "com.slimereborn.game",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "/resources/",
+  "url": "/index.html",
+  "enableServer": true,
+  "enableNativeAPI": false,
+  "tokenSecurity": "one-time",
+  "logging": { "enabled": false, "writeToLogFile": false },
+  "modes": {
+    "window": {
+      "title": "Slime Reborn — Terre Spezzate",
+      "width": 1280, "height": 720, "minWidth": 800, "minHeight": 450,
+      "center": true, "fullScreen": false, "alwaysOnTop": false, "maximize": true,
+      "enableInspector": false, "borderless": false, "resizable": true, "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "SlimeReborn",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/resources/js/neutralino.js",
+    "binaryVersion": "5.4.0",
+    "clientVersion": "5.4.0"
+  }
+}
