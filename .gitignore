@@ -11,3 +11,4 @@ captures/
 # Node / tooling
 node_modules/
 tools/screenshots/
+dist/
