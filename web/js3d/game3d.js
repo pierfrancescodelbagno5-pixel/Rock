@@ -229,6 +229,7 @@
     return h * 16 + m + Math.max(0, d - (MAPR - 70)) * 0.5; // hills rise at the map edge
   }
   function heightAt(x, z) {
+    if (API.pocket && API.pocket.contains(x, z)) return API.pocket.heightAt ? API.pocket.heightAt(x, z) : API.pocket.h;
     let h = rawH(x, z);
     for (const f of FLAT) {
       const d = Math.hypot(x - f.x, z - f.z);
@@ -575,14 +576,24 @@
   }
 
   /* ------------------------------------------------------------ graces & markers */
-  const graceObjs = LOC.grace.map((g) => {
+  function makeGrace(g) {
     const y = heightAt(g.x, g.z);
     const m = new T.Mesh(new T.OctahedronGeometry(0.35, 0), new T.MeshBasicMaterial({ color: hdr('#ffe08a', 3) }));
     m.position.set(g.x, y + 1.3, g.z); scene.add(m);
     const halo = new T.Sprite(new T.SpriteMaterial({ map: dot, color: hdr('#ffcf5a', 2.2), transparent: true, blending: T.AdditiveBlending, depthWrite: false }));
     halo.scale.set(4, 4, 1); halo.position.copy(m.position); scene.add(halo);
     return Object.assign({ y, mesh: m, halo }, g);
-  });
+  }
+  const graceObjs = LOC.grace.map(makeGrace);
+  function addGrace(x, z, name) {
+    const g = { x, z, name };
+    LOC.grace.push(g); graceObjs.push(makeGrace(g));
+    return graceObjs.length - 1;
+  }
+  function teleport(x, z) {
+    P.x = x; P.z = z; P.vx = P.vz = 0; P.y = 0;
+    camPos.set(x, heightAt(x, z) + 6, z + 10);
+  }
   let stainMesh = null;
   function placeStain() {
     if (stainMesh) { scene.remove(stainMesh); stainMesh = null; }
@@ -608,6 +619,7 @@
     P.maxFp = Math.round((80 + (S.mnd - 10) * 9) * CLS.fp);
     P.maxSt = Math.round((90 + (S.end - 10) * 5) * CLS.st);
     P.dmg = (1 + (S.str - 10) * 0.06) * CLS.dmg * (1 + S.essences * 0.02);
+    hook('recalc', P, full);
     if (full) { P.hp = P.maxHp; P.fp = P.maxFp; P.st = P.maxSt; P.flasks = S.flasks; }
   }
   recalc(true);
@@ -883,6 +895,7 @@
       e.bar = { bg, fg }; scene.add(bg, fg); bg.visible = fg.visible = false;
     }
     enemies.push(e);
+    hook('onSpawn', e);
     return e;
   }
   function populate() {
@@ -1391,7 +1404,7 @@
       const dx = P.x - c.x, dz = P.z - c.z, d = Math.hypot(dx, dz), m = c.r + P.r;
       if (d < m && d > 0.001) { P.x = c.x + (dx / d) * m; P.z = c.z + (dz / d) * m; }
     }
-    const R = Math.hypot(P.x, P.z); if (R > MAPR - 5) { P.x *= (MAPR - 5) / R; P.z *= (MAPR - 5) / R; }
+    const R = Math.hypot(P.x, P.z); if (R > MAPR - 5 && !(API.pocket && API.pocket.contains(P.x, P.z))) { P.x *= (MAPR - 5) / R; P.z *= (MAPR - 5) / R; }
     if (fogWall.visible) {
       const dx = P.x - LOC.arena.x, dz = P.z - LOC.arena.z, d = Math.hypot(dx, dz), m = LOC.arena.r - 1;
       if (d > m) { P.x = LOC.arena.x + (dx / d) * m; P.z = LOC.arena.z + (dz / d) * m; }
@@ -1880,6 +1893,6 @@
     get state() { return state; }, set state(v) { state = v; },
     pressed: (id) => !!input.pressed[id], setShake: (v) => { shake = Math.max(shake, v); }, setHitstop: (v) => { hitstop = Math.max(hitstop, v); },
     register(pl) { plugins.push(pl); try { if (pl.init) pl.init(API); if (pl.populate) pl.populate(); } catch (err) { console.error('[plugin init ' + pl.id + ']', err); } },
-    addButton, buttons, mapMarkers: [], compassMarkers: [], oracle, dmgNum });
+    addButton, buttons, mapMarkers: [], compassMarkers: [], oracle, dmgNum, addGrace, teleport, lightPillar, dmgNum2: dmgNum, openGrace: (i) => openGrace(i) });
   window.SK3D = API;
 })();

@@ -1295,6 +1295,15 @@
         cost: (id) => (DEFS[id] ? DEFS[id].cost : 0),
         level: (id) => lv(id),
         grant, cast,
+        // register an extra ability at runtime (used by rpg3d for class spells)
+        register(id, def, castFn) {
+          if (!id || !def) return;
+          DEFS[id] = Object.assign({ name: id, icon: '✦', color: '#ffffff', cost: 10, cd: 1, desc: '' }, def);
+          if (ORDER.indexOf(id) < 0) ORDER.push(id);
+          if (castFn) CAST[id] = castFn;
+          refreshOwned();
+        },
+        has: (id) => lv(id) > 0,
       };
       API.fireProjectile = fire;
       API.rootEnemy = rootEnemy;
