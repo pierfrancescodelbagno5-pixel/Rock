@@ -90,6 +90,9 @@
   .muted { color: #a8987a; font-size: 13px; }
   #rotate { position: fixed; inset: 0; background: #0b0a08; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; font-size: 18px; }
   @media (orientation: portrait) and (max-width: 700px) { #rotate { display: flex; } }
+  #keys { display: none; position: absolute; right: calc(16px + env(safe-area-inset-right)); bottom: 40px; font-size: 11px; line-height: 1.5; color: #d8c79a;
+    text-align: right; text-shadow: 0 1px 2px #000; background: rgba(0,0,0,.35); padding: 6px 10px; border: 1px solid rgba(214,186,120,.3); }
+  @media (hover: hover) and (pointer: fine) { .tbtn { display: none !important; } #keys { display: block; } }
 </style>
 </head>
 <body>
@@ -110,6 +113,7 @@
   <div id="toast"></div>
   <div id="msg"></div>
   <div id="prompt"></div>
+  <div id="keys">WASD muovi · Mouse trascina: visuale · Click: attacco · Tasto destro / K: pesante<br>Spazio schiva · Shift corri · Q mira · E interagisci · G Predatore<br>F abilità · 1-9 scegli abilità · T Mimetismo · R cura · M mappa · Esc pausa</div>
 </div>
 <div id="touch"><div id="joy"><i></i></div></div>
 <div class="panel" id="grace"><div class="box"></div></div>

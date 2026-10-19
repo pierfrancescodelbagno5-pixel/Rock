@@ -984,7 +984,7 @@
   view.addEventListener('pointerdown', (e) => {
     try { SK.Audio.init(); SK.Audio.resume(); } catch (er) { /* ignore */ }
     if (e.pointerType === 'mouse' && e.button === 0 && !document.pointerLockElement && e.clientX > innerWidth * 0.4) { /* mouse: drag to look */ }
-    if (e.clientX < innerWidth * 0.42 && joy.id < 0) {
+    if (e.pointerType !== 'mouse' && e.clientX < innerWidth * 0.42 && joy.id < 0) {
       joy.id = e.pointerId; joy.ox = joy.x = e.clientX; joy.oy = joy.y = e.clientY;
       joyEl.style.display = 'block'; joyEl.style.left = joy.ox + 'px'; joyEl.style.top = joy.oy + 'px';
     } else if (look.id < 0) { look.id = e.pointerId; look.x = e.clientX; look.y = e.clientY; look.moved = 0; }

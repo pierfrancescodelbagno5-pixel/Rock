@@ -24,6 +24,9 @@ Modalità action-RPG 3D low-poly (dal menu: **Terre Spezzate 3D**): **mondo aper
 - Le 6 compagne in 3D: dialoghi, regali, appuntamenti, porta con te, matrimonio (anche più spose).
 - HUD nuovo: ritratto, bussola, Oracolo, barra abilità con ricarica, numeri del danno.
 
+## Versione PC
+Scarica **[SlimeReborn-PC.zip](SlimeReborn-PC.zip)**, estrai la cartella e apri `index.html` (o `Gioca.bat` su Windows) con Chrome, Edge o Firefox.
+
 ## Comandi
 Touch: joystick a sinistra, pulsanti a destra (Predatore, Scatto, 3 abilità). Tastiera: WASD, Spazio, E, 1/2/3, F, Esc.
 
