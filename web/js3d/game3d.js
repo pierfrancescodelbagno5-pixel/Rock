@@ -856,7 +856,7 @@
     fx.push({ kind: 'pillar', m, t: life || 0.9, max: life || 0.9 });
   }
   function transform() {
-    const list = ['slime', 'human', 'wolf'].filter((f) => S.forms[f]);
+    const list = ['slime', 'human', 'wolf', 'dragon'].filter((f) => S.forms[f] && FORM[f]);
     const next = list[(list.indexOf(P.form) + 1) % list.length];
     if (next === P.form || P.atk || P.roll > 0) return;
     P.form = next; P.formFx = 0.5;
@@ -1217,6 +1217,7 @@
     sfx(e.d.boss ? 'bossDie' : 'kill');
     if (input.lock === e) input.lock = null;
     e.absorbed = !!absorbed;
+    if (absorbed && e.type === 'wolf' && !S.forms.wolf) { S.forms.wolf = true; setTimeout(() => oracle('《Analisi completata. Mimetismo acquisito: Lupo Tempesta》', true), 1200); }
     hook('onKill', e, !!absorbed, gain);
     if (e.d.boss) {
       S.bosses[e.type] = true;
