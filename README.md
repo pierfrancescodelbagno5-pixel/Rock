@@ -24,8 +24,17 @@ Modalità action-RPG 3D low-poly (dal menu: **Terre Spezzate 3D**): **mondo aper
 - Le 6 compagne in 3D: dialoghi, regali, appuntamenti, porta con te, matrimonio (anche più spose).
 - HUD nuovo: ritratto, bussola, Oracolo, barra abilità con ricarica, numeri del danno.
 
+
+### Versione 1 (RPG completo)
+- Inizi nella metropoli **Altheria, Città dei Mille Mondi**: centinaia di abitanti, quartieri di mondi diversi, castello, cattedrale, accademia di magia, arena, gilda, negozi, taverna, canali.
+- **Classi**: Guerriero, Paladino, Mago Elementale, Arciere, Assassino, Evocatore, Slime Predatore (trasformazioni) e la classe mitica Pierfrancesco Del Bagno.
+- **Livelli ed esperienza** fino al 99, attributi, magie e abilità di classe, **armi, armature, loot** con rarità e affissi, inventario, negozi, maestro di magia.
+- **Missioni**: storia principale a capitoli, missioni secondarie, **Gilda degli Avventurieri** con ranghi F→S e contratti.
+- **Torre dei Mille Piani**: dungeon a piani procedurali con trappole, forzieri, boss ogni 5 piani.
+- Versione PC: `SlimeReborn-PC.zip` con **SlimeReborn.exe** (Windows), più Linux e macOS.
+
 ## Versione PC
-Scarica **[SlimeReborn-PC.zip](SlimeReborn-PC.zip)**, estrai la cartella e apri `index.html` (o `Gioca.bat` su Windows) con Chrome, Edge o Firefox.
+Scarica **[SlimeReborn-PC.zip](SlimeReborn-PC.zip)**, estrai la cartella e avvia **SlimeReborn.exe** (Windows 10/11). Tieni `resources.neu` nella stessa cartella.
 
 ## Comandi
 Touch: joystick a sinistra, pulsanti a destra (Predatore, Scatto, 3 abilità). Tastiera: WASD, Spazio, E, 1/2/3, F, Esc.
