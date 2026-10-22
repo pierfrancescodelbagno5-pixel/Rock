@@ -36,6 +36,9 @@ Modalità action-RPG 3D low-poly (dal menu: **Terre Spezzate 3D**): **mondo aper
 ## Versione PC
 Scarica **[SlimeReborn-PC.zip](SlimeReborn-PC.zip)**, estrai la cartella e avvia **SlimeReborn.exe** (Windows 10/11). Tieni `resources.neu` nella stessa cartella.
 
+## Versione Unreal Engine 5
+Progetto C++ in **[unreal/SlimeReborn](unreal/SlimeReborn)**: mondo aperto generato dal codice, illuminazione Lumen, nuvole volumetriche, città di Altheria, slime con Predatore e Mimetismo, 4 classi, boss e missioni. Lo apri e lo compili con UE 5.3–5.5 e Visual Studio 2022: istruzioni passo passo in **[LEGGIMI.md](unreal/SlimeReborn/LEGGIMI.md)**.
+
 ## Comandi
 Touch: joystick a sinistra, pulsanti a destra (Predatore, Scatto, 3 abilità). Tastiera: WASD, Spazio, E, 1/2/3, F, Esc.
 
