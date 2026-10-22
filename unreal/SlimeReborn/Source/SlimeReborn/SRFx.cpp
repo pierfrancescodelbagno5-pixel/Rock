@@ -24,13 +24,13 @@ ASRFx::ASRFx()
 	InitialLifeSpan = 3.f;
 }
 
-ASRFx* ASRFx::Spawn(UWorld* World, ESRFxKind Kind, const FVector& At, const FLinearColor& Color, float Size, float Duration, const FRotator& Rot)
+ASRFx* ASRFx::Spawn(UWorld* World, ESRFxKind InKind, const FVector& At, const FLinearColor& InColor, float InSize, float InDuration, const FRotator& Rot)
 {
 	if (!World) return nullptr;
 	FActorSpawnParameters P;
 	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	ASRFx* Fx = World->SpawnActor<ASRFx>(ASRFx::StaticClass(), At, Rot, P);
-	if (Fx) Fx->Init(Kind, Color, Size, Duration);
+	if (Fx) Fx->Init(InKind, InColor, InSize, InDuration);
 	return Fx;
 }
 

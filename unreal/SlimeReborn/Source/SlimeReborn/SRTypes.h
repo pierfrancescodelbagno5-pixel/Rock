@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "SRTypes.generated.h"
 
+class AActor;
 class UStaticMesh;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;

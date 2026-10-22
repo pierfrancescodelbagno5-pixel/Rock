@@ -17,7 +17,7 @@ class SLIMEREBORN_API ASRProjectile : public AActor
 public:
 	ASRProjectile();
 
-	static ASRProjectile* Fire(UWorld* World, AActor* Shooter, const FVector& From, const FVector& Dir, ESRSkill Skill, float Damage, bool bFromEnemy);
+	static ASRProjectile* Fire(UWorld* World, AActor* Shooter, const FVector& From, const FVector& Dir, ESRSkill InSkill, float InDamage, bool bInFromEnemy);
 
 	virtual void Tick(float DeltaSeconds) override;
 

@@ -83,9 +83,15 @@ float SR::HeightAt(float X, float Y)
 	const float E = FMath::SmoothStep(30000.f, 90000.f, Y) * (1.f - M);
 	H += E * Ridged(X * 0.00005f, Y * 0.00005f, 3) * 2600.f;
 
-	// South-eastern swamp lake
-	const float L = 1.f - FMath::SmoothStep(5000.f, 17000.f, Dist2(X, Y, -60000.f, 50000.f));
-	H = FMath::Lerp(H, -450.f, L * 0.92f);
+	// South-eastern swamp: flat marshland with shallow pools around a lake
+	const float LD = Dist2(X, Y, -60000.f, 50000.f);
+	const float Swamp = 1.f - FMath::SmoothStep(14000.f, 30000.f, LD);
+	if (Swamp > 0.f)
+	{
+		H = FMath::Lerp(H, 140.f + SR::Noise2(X * 0.0004f, Y * 0.0004f) * 160.f, Swamp);
+	}
+	const float L = 1.f - FMath::SmoothStep(4000.f, 12000.f, LD);
+	H = FMath::Lerp(H, -450.f, L * 0.95f);
 
 	// Island coastline
 	const float Edge = FMath::SmoothStep(0.80f, 0.97f, D);
@@ -184,9 +190,9 @@ const TArray<FSRGrace>& SR::Graces()
 		auto Add = [](const TCHAR* N, float X, float Y) { List.Add({ N, Ground(X, Y) }); };
 		Add(TEXT("Fontana di Altheria"), -1200.f, 1400.f);
 		Add(TEXT("Soglia della Foresta"), 6000.f, -42000.f);
-		Add(TEXT("Accampamento Goblin"), -20000.f, -16000.f);
+		Add(TEXT("Accampamento Goblin"), -26800.f, -17800.f);
 		Add(TEXT("Colline Orchesche"), 14000.f, 52000.f);
-		Add(TEXT("Riva della Palude"), -55000.f, 24000.f);
+		Add(TEXT("Riva della Palude"), -48000.f, 40000.f);
 		Add(TEXT("Passo del Nord"), 62000.f, 6000.f);
 		Add(TEXT("Soglia del Trono"), 30000.f, 82000.f);
 		Add(TEXT("Nido dei Ragni"), -14000.f, -82000.f);
@@ -203,7 +209,7 @@ const TArray<FSRZone>& SR::Zones()
 		List.Add({ TEXT("Bosco dei Lupi"), FVector2D(6000.f, -58000.f), 13000.f, ESREnemyKind::Wolf, 7, 3 });
 		List.Add({ TEXT("Tana dei Ragni"), FVector2D(-18000.f, -94000.f), 9000.f, ESREnemyKind::Spider, 7, 5 });
 		List.Add({ TEXT("Colline Orchesche"), FVector2D(22000.f, 64000.f), 14000.f, ESREnemyKind::Orc, 6, 7 });
-		List.Add({ TEXT("Palude delle Squame"), FVector2D(-64000.f, 30000.f), 12000.f, ESREnemyKind::Lizardman, 7, 9 });
+		List.Add({ TEXT("Palude delle Squame"), FVector2D(-50000.f, 40000.f), 9000.f, ESREnemyKind::Lizardman, 7, 9 });
 		List.Add({ TEXT("Rovine del Nord"), FVector2D(78000.f, 9000.f), 14000.f, ESREnemyKind::Knight, 5, 13 });
 		List.Add({ TEXT("Trono del Re degli Orchi"), FVector2D(40000.f, 94000.f), 2500.f, ESREnemyKind::OrcKing, 1, 16 });
 		List.Add({ TEXT("Strada Meridionale"), FVector2D(-26000.f, 6000.f), 10000.f, ESREnemyKind::Goblin, 5, 2 });

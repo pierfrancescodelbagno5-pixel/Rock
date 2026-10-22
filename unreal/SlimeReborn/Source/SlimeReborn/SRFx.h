@@ -28,8 +28,8 @@ class SLIMEREBORN_API ASRFx : public AActor
 public:
 	ASRFx();
 
-	static ASRFx* Spawn(UWorld* World, ESRFxKind Kind, const FVector& At, const FLinearColor& Color, float Size,
-		float Duration = 0.45f, const FRotator& Rot = FRotator::ZeroRotator);
+	static ASRFx* Spawn(UWorld* World, ESRFxKind InKind, const FVector& At, const FLinearColor& InColor, float InSize,
+		float InDuration = 0.45f, const FRotator& Rot = FRotator::ZeroRotator);
 
 	virtual void Tick(float DeltaSeconds) override;
 

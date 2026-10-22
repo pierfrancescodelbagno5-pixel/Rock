@@ -14,6 +14,7 @@
 #include "Components/InputComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "InputCoreTypes.h"
@@ -107,9 +108,9 @@ void ASlimeCharacter::BuildHuman()
 {
 	if (HumanRig.Root)
 	{
-		TArray<USceneComponent*> Children;
-		HumanRig.Root->GetChildrenComponents(true, Children);
-		for (USceneComponent* C : Children)
+		TArray<USceneComponent*> ChildComps;
+		HumanRig.Root->GetChildrenComponents(true, ChildComps);
+		for (USceneComponent* C : ChildComps)
 		{
 			if (C) C->DestroyComponent();
 		}
@@ -362,11 +363,11 @@ void ASlimeCharacter::UnlockForm(ESRForm NewForm)
 
 void ASlimeCharacter::SetForm(ESRForm NewForm, bool bFx)
 {
-	float R = 45.f, HH = 45.f, Walk = 520.f, Jump = 780.f, Arm = 520.f;
+	float R = 45.f, HH = 45.f, Walk = 520.f, JumpZ = 780.f, Arm = 520.f;
 	switch (NewForm)
 	{
-	case ESRForm::Human: R = 34.f; HH = 92.f; Walk = 600.f; Jump = 640.f; Arm = 430.f; break;
-	case ESRForm::Wolf: R = 48.f; HH = 62.f; Walk = 780.f; Jump = 720.f; Arm = 560.f; break;
+	case ESRForm::Human: R = 34.f; HH = 92.f; Walk = 600.f; JumpZ = 640.f; Arm = 430.f; break;
+	case ESRForm::Wolf: R = 48.f; HH = 62.f; Walk = 780.f; JumpZ = 720.f; Arm = 560.f; break;
 	default: break;
 	}
 	const float OldHH = GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
@@ -374,7 +375,7 @@ void ASlimeCharacter::SetForm(ESRForm NewForm, bool bFx)
 	if (HH > OldHH) AddActorWorldOffset(FVector(0, 0, HH - OldHH + 2.f));
 	Form = NewForm;
 	BaseWalk = Walk;
-	GetCharacterMovement()->JumpZVelocity = Jump;
+	GetCharacterMovement()->JumpZVelocity = JumpZ;
 	TargetArm = Arm;
 
 	if (SlimeRoot) SlimeRoot->SetVisibility(Form == ESRForm::Slime, true);
@@ -627,7 +628,8 @@ FString ASlimeCharacter::GetInteractPrompt() const
 	if (FindGrace(450.f) >= 0) return TEXT("[F] Riposa alla Grazia  (salva, cura, viaggio rapido)");
 	if (const ASREnemy* C = FindCorpse(450.f))
 	{
-		return FString::Printf(IsPredator() ? TEXT("[E] Predazione: %s") : TEXT("[E] Saccheggia: %s"), SR::Enemy(C->Kind).Name);
+		return IsPredator() ? FString::Printf(TEXT("[E] Predazione: %s"), SR::Enemy(C->Kind).Name)
+			: FString::Printf(TEXT("[E] Saccheggia: %s"), SR::Enemy(C->Kind).Name);
 	}
 	return FString();
 }

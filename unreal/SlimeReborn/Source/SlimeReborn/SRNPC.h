@@ -41,7 +41,7 @@ public:
 	FString PromptVerb() const;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC") FString NPCName;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC") ESRNPCRole Role = ESRNPCRole::Citizen;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC") ESRNPCRole NPCRole = ESRNPCRole::Citizen;
 	UPROPERTY(VisibleAnywhere, Category = "NPC") int32 Seed = 0;
 	UPROPERTY(VisibleAnywhere, Category = "NPC") float WanderRadius = 0.f;
 

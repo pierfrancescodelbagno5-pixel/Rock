@@ -25,13 +25,13 @@ ASRProjectile::ASRProjectile()
 	InitialLifeSpan = 6.f;
 }
 
-ASRProjectile* ASRProjectile::Fire(UWorld* World, AActor* Shooter, const FVector& From, const FVector& Dir, ESRSkill Skill, float Damage, bool bFromEnemy)
+ASRProjectile* ASRProjectile::Fire(UWorld* World, AActor* Shooter, const FVector& From, const FVector& Dir, ESRSkill InSkill, float InDamage, bool bInFromEnemy)
 {
 	if (!World) return nullptr;
 	FActorSpawnParameters P;
 	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	ASRProjectile* Proj = World->SpawnActor<ASRProjectile>(ASRProjectile::StaticClass(), From, Dir.Rotation(), P);
-	if (Proj) Proj->Init(Shooter, Dir.GetSafeNormal(), Skill, Damage, bFromEnemy);
+	if (Proj) Proj->Init(Shooter, Dir.GetSafeNormal(), InSkill, InDamage, bInFromEnemy);
 	return Proj;
 }
 

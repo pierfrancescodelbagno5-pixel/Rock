@@ -23,7 +23,7 @@ ASRNPC::ASRNPC()
 void ASRNPC::Setup(const FString& InName, ESRNPCRole InRole, int32 InSeed, float InWanderRadius)
 {
 	NPCName = InName;
-	Role = InRole;
+	NPCRole = InRole;
 	Seed = InSeed;
 	WanderRadius = InWanderRadius;
 }
@@ -36,7 +36,7 @@ void ASRNPC::BeginPlay()
 	FRandomStream R(Seed);
 	WaitTime = R.FRandRange(0.f, 4.f);
 	WalkPhase = R.FRandRange(0.f, 6.f);
-	if (Role == ESRNPCRole::Child) GetCharacterMovement()->MaxWalkSpeed = 190.f;
+	if (NPCRole == ESRNPCRole::Child) GetCharacterMovement()->MaxWalkSpeed = 190.f;
 	BuildBody();
 }
 
@@ -57,7 +57,7 @@ void ASRNPC::BuildBody()
 	S.Height = R.FRandRange(0.92f, 1.06f);
 	S.bBeard = !bFemale && R.FRand() < 0.3f;
 
-	switch (Role)
+	switch (NPCRole)
 	{
 	case ESRNPCRole::Child:
 		S.Height = 0.62f;
@@ -90,7 +90,7 @@ void ASRNPC::BuildBody()
 	}
 	USceneComponent* Base = SR::AddPivot(this, GetCapsuleComponent(), FVector(0, 0, -92.f));
 	Rig = SR::BuildHumanoid(this, Base, S);
-	if (Role == ESRNPCRole::Bard)
+	if (NPCRole == ESRNPCRole::Bard)
 	{
 		SR::AddPart(this, Rig.Torso, TEXT("Sphere"), FVector(18.f, 0, 120.f), FVector(0.3f, 0.12f, 0.36f), SR::Hex(0x9a6a3a));
 		SR::AddPart(this, Rig.Torso, TEXT("Cube"), FVector(22.f, 25.f, 150.f), FVector(0.05f, 0.5f, 0.05f), SR::Hex(0x5a3a1a), FRotator(0, 0, 30.f));
@@ -146,7 +146,7 @@ void ASRNPC::Tick(float DeltaSeconds)
 	const float Amount = FMath::Clamp(Speed / 160.f, 0.f, 1.f);
 	WalkPhase += DeltaSeconds * (2.f + Speed * 0.045f);
 	Rig.Walk(WalkPhase, Amount, Clock);
-	if (Role == ESRNPCRole::Bard && Rig.ArmR)
+	if (NPCRole == ESRNPCRole::Bard && Rig.ArmR)
 	{
 		Rig.ArmR->SetRelativeRotation(FRotator(40.f + FMath::Sin(Clock * 9.f) * 12.f, 0, 25.f));
 	}
@@ -154,7 +154,7 @@ void ASRNPC::Tick(float DeltaSeconds)
 
 FString ASRNPC::PromptVerb() const
 {
-	switch (Role)
+	switch (NPCRole)
 	{
 	case ESRNPCRole::GuildMaster: return TEXT("Missioni");
 	case ESRNPCRole::Merchant: return TEXT("Compra pozione (25 oro)");
@@ -170,7 +170,7 @@ FString ASRNPC::Interact(ASlimeCharacter* Player)
 	Listener = Player;
 	TalkTime = 4.f;
 	ASRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ASRGameMode>() : nullptr;
-	switch (Role)
+	switch (NPCRole)
 	{
 	case ESRNPCRole::GuildMaster:
 		return GM ? GM->GuildTalk(Player) : FString();
@@ -256,7 +256,7 @@ FString ASRNPC::CitizenLine(ASlimeCharacter* Player)
 		TEXT("Da grande voglio diventare un avventuriero di rango S!"),
 		TEXT("Mia mamma dice di non uscire dalle mura. Ma io ho visto un goblin una volta!"),
 	};
-	if (Role == ESRNPCRole::Child) return Kid[(Seed + LineIndex++) % UE_ARRAY_COUNT(Kid)];
+	if (NPCRole == ESRNPCRole::Child) return Kid[(Seed + LineIndex++) % UE_ARRAY_COUNT(Kid)];
 	if (Player && Player->Level >= 10 && (LineIndex % 4) == 3)
 	{
 		++LineIndex;

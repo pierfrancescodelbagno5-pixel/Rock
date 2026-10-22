@@ -488,7 +488,7 @@ void ASRWorld::BuildCity()
 	HISM* Road = MakeHISM(TEXT("Cube"), SR::Hex(0x5f5951), false);
 	HISM* Beam = MakeHISM(TEXT("Cube"), SR::Hex(0x4a3020), false);
 	HISM* Door = MakeHISM(TEXT("Cube"), SR::Hex(0x3a2616), false);
-	HISM* Gold = MakeHISM(TEXT("Cube"), SR::Hex(0xc9a227), false);
+	HISM* GoldTrim = MakeHISM(TEXT("Cube"), SR::Hex(0xc9a227), false);
 	HISM* Banner = MakeHISM(TEXT("Cube"), SR::Hex(0x8c1c1c), false);
 	HISM* Wood = MakeHISM(TEXT("Cube"), SR::Hex(0x8a6a45), true);
 	HISM* Window = MakeHISM(TEXT("Cube"), SR::Hex(0xffc46b), false, 0.f, ESRMat::Fx, 0.3f);
@@ -566,7 +566,7 @@ void ASRWorld::BuildCity()
 		AddBox(Stone, Id, FVector(P.X, P.Y, Z + 980.f), FVector(1300.f, 380.f, 260.f), FRotator(0, G + 90.f, 0));
 		const FVector B = Dir * (WR + 200.f);
 		AddBox(Banner, Id, FVector(B.X, B.Y, Z + 760.f), FVector(320.f, 16.f, 520.f), FRotator(0, G + 90.f, 0));
-		AddBox(Gold, Id, FVector(B.X, B.Y, Z + 1030.f) + Dir * 12.f, FVector(360.f, 10.f, 30.f), FRotator(0, G + 90.f, 0));
+		AddBox(GoldTrim, Id, FVector(B.X, B.Y, Z + 1030.f) + Dir * 12.f, FVector(360.f, 10.f, 30.f), FRotator(0, G + 90.f, 0));
 	}
 
 	// ---- Fountain plaza ----
@@ -607,7 +607,7 @@ void ASRWorld::BuildCity()
 		AddBox(Beam, T, FVector(220.f, -90.f, 130.f), FVector(16.f, 16.f, 260.f));
 		const FVector CL = T.TransformPosition(FVector(0, 0, 300.f));
 		SR::AddPart(this, Root, TEXT("Cube"), CL, FVector(5.4f, 2.6f, 0.08f), SR::Hex(Canopies[s % 6]), FRotator(0, A + 90.f, 0) + FRotator(0, 0, -9.f));
-		AddBox(Gold, T, FVector(-120.f, 0, 125.f), FVector(60.f, 60.f, 30.f));
+		AddBox(GoldTrim, T, FVector(-120.f, 0, 125.f), FVector(60.f, 60.f, 30.f));
 		AddBox(Door, T, FVector(120.f, 30.f, 130.f), FVector(80.f, 80.f, 40.f));
 	}
 
@@ -626,11 +626,11 @@ void ASRWorld::BuildCity()
 			AddBox(TowerRoof, Id, C + K + FVector(0, 0, 3300.f + 450.f), FVector(1000.f, 1000.f, 900.f));
 		}
 		AddBox(Door, Id, C + FVector(-1310.f, 0, 450.f), FVector(20.f, 640.f, 900.f));
-		AddBox(Gold, Id, C + FVector(-1318.f, 0, 930.f), FVector(16.f, 720.f, 60.f));
+		AddBox(GoldTrim, Id, C + FVector(-1318.f, 0, 930.f), FVector(16.f, 720.f, 60.f));
 		for (int32 Side = -1; Side <= 1; Side += 2)
 		{
 			AddBox(Banner, Id, C + FVector(-1315.f, Side * 950.f, 1700.f), FVector(14.f, 320.f, 1000.f));
-			AddBox(Gold, Id, C + FVector(-1322.f, Side * 950.f, 1900.f), FVector(10.f, 120.f, 120.f));
+			AddBox(GoldTrim, Id, C + FVector(-1322.f, Side * 950.f, 1900.f), FVector(10.f, 120.f, 120.f));
 		}
 		for (int32 Step = 0; Step < 4; ++Step)
 		{
@@ -650,8 +650,8 @@ void ASRWorld::BuildCity()
 		Gable(Roofs[1], FTransform(C), 1900.f, 3800.f, 1700.f);
 		AddBox(StoneLight, Id, C + FVector(-2300.f, 0, 2200.f), FVector(1000.f, 1000.f, 4400.f));
 		AddBox(TowerRoof, Id, C + FVector(-2300.f, 0, 4400.f + 900.f), FVector(1150.f, 1150.f, 1800.f));
-		AddBox(Gold, Id, C + FVector(-2300.f, 0, 6300.f), FVector(40.f, 40.f, 400.f));
-		AddBox(Gold, Id, C + FVector(-2300.f, 0, 6380.f), FVector(40.f, 220.f, 40.f));
+		AddBox(GoldTrim, Id, C + FVector(-2300.f, 0, 6300.f), FVector(40.f, 40.f, 400.f));
+		AddBox(GoldTrim, Id, C + FVector(-2300.f, 0, 6380.f), FVector(40.f, 220.f, 40.f));
 		AddBox(Window, Id, C + FVector(-2805.f, 0, 2900.f), FVector(12.f, 420.f, 420.f));
 		AddBox(Door, Id, C + FVector(-2805.f, 0, 380.f), FVector(14.f, 420.f, 760.f));
 		for (int32 W = 0; W < 6; ++W)
@@ -672,7 +672,7 @@ void ASRWorld::BuildCity()
 		AddBox(Beam, Id, C + FVector(0, 0, 1300.f), FVector(2480.f, 2880.f, 40.f));
 		Gable(Roofs[2], FTransform(FRotator(0, 90.f, 0), C), 2200.f, 2800.f, 2400.f);
 		AddBox(Door, Id, C + FVector(0, 1310.f, 400.f), FVector(500.f, 16.f, 800.f));
-		AddBox(Gold, Id, C + FVector(0, 1330.f, 980.f), FVector(900.f, 14.f, 220.f));
+		AddBox(GoldTrim, Id, C + FVector(0, 1330.f, 980.f), FVector(900.f, 14.f, 220.f));
 		AddBox(Banner, Id, C + FVector(-700.f, 1330.f, 1700.f), FVector(220.f, 12.f, 600.f));
 		AddBox(Banner, Id, C + FVector(700.f, 1330.f, 1700.f), FVector(220.f, 12.f, 600.f));
 		for (int32 W = 0; W < 4; ++W)
@@ -708,7 +708,7 @@ void ASRWorld::BuildCity()
 		AddBox(HouseWalls[0], Id, C + FVector(0, 0, 1000.f + 400.f), FVector(2500.f, 1900.f, 800.f));
 		Gable(Roofs[0], FTransform(C), 1800.f, 2500.f, 1900.f);
 		AddBox(Door, Id, C + FVector(0, -910.f, 380.f), FVector(380.f, 16.f, 760.f));
-		AddBox(Gold, Id, C + FVector(700.f, -1000.f, 900.f), FVector(300.f, 12.f, 200.f));
+		AddBox(GoldTrim, Id, C + FVector(700.f, -1000.f, 900.f), FVector(300.f, 12.f, 200.f));
 		for (int32 W = 0; W < 4; ++W)
 		{
 			AddBox(Window, Id, C + FVector(-900.f + W * 600.f, -958.f, 1400.f), FVector(160.f, 12.f, 220.f));
@@ -960,13 +960,13 @@ void ASRWorld::SpawnCitizens()
 	if (!World) return;
 	const float Z = SR::CityZ + 110.f;
 
-	auto Spawn = [World, Z](const FString& Name, ESRNPCRole Role, float X, float Y, float Wander, int32 Seed, float Yaw)
+	auto Spawn = [World, Z](const FString& Name, ESRNPCRole InRole, float X, float Y, float Wander, int32 Seed, float Yaw)
 	{
 		const FTransform T(FRotator(0, Yaw, 0), FVector(X, Y, Z));
 		ASRNPC* N = World->SpawnActorDeferred<ASRNPC>(ASRNPC::StaticClass(), T, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 		if (N)
 		{
-			N->Setup(Name, Role, Seed, Wander);
+			N->Setup(Name, InRole, Seed, Wander);
 			N->FinishSpawning(T);
 		}
 		return N;
