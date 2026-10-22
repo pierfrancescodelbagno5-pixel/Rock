@@ -1044,14 +1044,16 @@
   view.addEventListener('pointerdown', (e) => {
     try { SK.Audio.init(); SK.Audio.resume(); } catch (er) { /* ignore */ }
     if (e.pointerType === 'mouse' && e.button === 0 && !document.pointerLockElement && e.clientX > innerWidth * 0.4) { /* mouse: drag to look */ }
+    if (joy.id >= 0 && e.pointerType !== 'mouse' && e.clientX < innerWidth * 0.42 && performance.now() - (joy.t || 0) > 250) { joy.id = -1; } // stale joystick: take over
     if (e.pointerType !== 'mouse' && e.clientX < innerWidth * 0.42 && joy.id < 0) {
+      joy.t = performance.now();
       joy.id = e.pointerId; joy.ox = joy.x = e.clientX; joy.oy = joy.y = e.clientY;
       joyEl.style.display = 'block'; joyEl.style.left = joy.ox + 'px'; joyEl.style.top = joy.oy + 'px';
     } else if (look.id < 0) { look.id = e.pointerId; look.x = e.clientX; look.y = e.clientY; look.moved = 0; }
     view.setPointerCapture(e.pointerId);
   });
   view.addEventListener('pointermove', (e) => {
-    if (e.pointerId === joy.id) { joy.x = e.clientX; joy.y = e.clientY; }
+    if (e.pointerId === joy.id) { joy.x = e.clientX; joy.y = e.clientY; joy.t = performance.now(); }
     if (e.pointerId === look.id) {
       const dx = e.clientX - look.x, dy = e.clientY - look.y;
       look.x = e.clientX; look.y = e.clientY; look.moved += Math.abs(dx) + Math.abs(dy);
@@ -1063,6 +1065,10 @@
     if (e.pointerId === look.id) { if (e.pointerType === 'mouse' && look.moved < 6) press('light'); look.id = -1; }
   };
   view.addEventListener('pointerup', endPtr); view.addEventListener('pointercancel', endPtr);
+  window.addEventListener('pointerup', endPtr); window.addEventListener('pointercancel', endPtr);
+  const resetInput = () => { input.keys = {}; joy.id = -1; look.id = -1; joyEl.style.display = 'none'; };
+  window.addEventListener('blur', resetInput);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) resetInput(); });
   view.addEventListener('contextmenu', (e) => { e.preventDefault(); press('heavy'); });
   // on-screen buttons
   const touchEl = $('touch');
@@ -1676,7 +1682,7 @@
   }
 
   /* ------------------------------------------------------------ grace / death / flow */
-  let cine = null;
+  let cine = null, stuckT = 0;
   let state = 'play', fadeT = 0, curRegion = regionAt(P.x, P.z);
   const fogTarget = new T.Color(REGIONS[curRegion].fog); regionFog.copy(fogTarget);
   /* world map with fast travel */
@@ -1918,6 +1924,11 @@
     if (toastT > 0) { toastT -= dt; if (toastT <= 0) $('toast').classList.remove('show'); }
     if (msgT > 0) { msgT -= dt; if (msgT <= 0) $('msg').classList.remove('show'); }
     hud(); updateOracle(Math.max(dt, 1 / 60)); updateDmg(Math.max(dt, 1 / 60));
+    if (state === 'menu') {
+      const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      const nothingOpen = !el || el === renderer.domElement || el === document.body || el.id === 'view';
+      if (!nothingOpen) stuckT = 0; else if (!stuckT) stuckT = now; else if (now - stuckT > 800) { state = 'play'; stuckT = 0; resetInput(); }
+    } else stuckT = 0;
     POST.comp.uniforms.hurt.value = Math.max(P.hitFlash * 3, P.hp > 0 && P.hp < P.maxHp * 0.25 ? 0.22 + 0.12 * Math.sin(now / 160) : 0);
     POST.render(now / 1000);
     input.pressed = {};
