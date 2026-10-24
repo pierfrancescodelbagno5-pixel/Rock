@@ -37,6 +37,8 @@ private:
 	void DrawPrompt(ASlimeCharacter* P);
 	void DrawDialog(ASlimeCharacter* P);
 	void DrawGraceMenu(ASlimeCharacter* P);
+	void DrawInventory(ASlimeCharacter* P);
+	void DrawParty(ASlimeCharacter* P, ASRGameMode* GM);
 	void DrawHelp();
 	void DrawDeath(ASlimeCharacter* P);
 	void DrawBoss(ASRGameMode* GM);

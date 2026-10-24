@@ -3,6 +3,8 @@
 #include "SRGameMode.h"
 #include "SREnemy.h"
 #include "SRWorld.h"
+#include "SRDungeon.h"
+#include "SRCompanion.h"
 #include "SRTypes.h"
 #include "Engine/Canvas.h"
 #include "Engine/Font.h"
@@ -13,9 +15,9 @@
 
 namespace
 {
-	const FLinearColor Gold(1.f, 0.8f, 0.35f);
-	const FLinearColor Cyan(0.45f, 0.85f, 1.f);
-	const FLinearColor Dim(0.75f, 0.75f, 0.78f);
+	const FLinearColor HudGold(1.f, 0.8f, 0.35f);
+	const FLinearColor HudCyan(0.45f, 0.85f, 1.f);
+	const FLinearColor HudDim(0.75f, 0.75f, 0.78f);
 }
 
 UFont* ASRHUD::Font() const
@@ -178,6 +180,8 @@ void ASRHUD::DrawHUD()
 	DrawOracle(Dt);
 	DrawToast(Dt);
 	DrawKeyHints();
+	DrawParty(P, GM);
+	if (P->bShowInventory) DrawInventory(P);
 	if (P->bGraceMenu) DrawGraceMenu(P);
 	if (P->bShowHelp) DrawHelp();
 	if (P->bDead) DrawDeath(P);
@@ -196,45 +200,48 @@ void ASRHUD::DrawMenu(ASRGameMode* GM)
 
 	const float Pulse = 0.85f + 0.15f * FMath::Sin(Time * 2.f);
 	Txt(TEXT("SLIME REBORN"), W * 0.5f, 40.f * UI, FLinearColor(0.55f, 0.85f, 1.f, Pulse), 92.f, true);
-	Txt(TEXT("TERRE SPEZZATE  -  Unreal Engine 5"), W * 0.5f, 150.f * UI, Gold, 26.f, true);
+	Txt(TEXT("TERRE SPEZZATE  -  Unreal Engine 5"), W * 0.5f, 150.f * UI, HudGold, 26.f, true);
 
-	const float CardW = 400.f * UI, CardH = 430.f * UI, Gap = 26.f * UI;
-	const float Total = CardW * 4 + Gap * 3;
+	const int32 NC = SR::NumClasses;
+	const float Gap = 22.f * UI;
+	const float CardW = FMath::Min(340.f * UI, (W - 60.f * UI - Gap * (NC - 1)) / NC), CardH = 450.f * UI;
+	const float Total = CardW * NC + Gap * (NC - 1);
 	const float X0 = (W - Total) * 0.5f, Y0 = H * 0.5f - CardH * 0.5f + 20.f * UI;
-	for (int32 i = 0; i < 4; ++i)
+	for (int32 i = 0; i < NC; ++i)
 	{
-		const FSRClassInfo& C = SR::Class(static_cast<ESRClass>(i));
-		const bool bSel = GM->MenuClass == i;
+		const ESRClass Cls = SR::ClassAt(i);
+		const FSRClassInfo& C = SR::Class(Cls);
+		const bool bSel = GM->MenuClass == static_cast<int32>(Cls);
 		const float X = X0 + i * (CardW + Gap);
 		const float Y = Y0 - (bSel ? 14.f * UI : 0.f);
 		Panel(X, Y, CardW, CardH, bSel ? FLinearColor(0.08f, 0.06f, 0.02f, 0.88f) : FLinearColor(0.f, 0.f, 0.f, 0.7f));
-		Frame(X, Y, CardW, CardH, bSel ? Gold : FLinearColor(1.f, 1.f, 1.f, 0.25f), bSel ? 3.f : 1.f);
-		const bool bMythic = i == 3;
-		Txt(FString::Printf(TEXT("[%d]"), i + 1), X + 18.f * UI, Y + 14.f * UI, Dim, 20.f);
+		Frame(X, Y, CardW, CardH, bSel ? HudGold : FLinearColor(1.f, 1.f, 1.f, 0.25f), bSel ? 3.f : 1.f);
+		const bool bMythic = Cls == ESRClass::Emperor;
+		Txt(FString::Printf(TEXT("[%d]"), i + 1), X + 18.f * UI, Y + 14.f * UI, HudDim, 20.f);
 		if (bMythic) Txt(TEXT("MITICA"), X + CardW - 110.f * UI, Y + 14.f * UI, FLinearColor(1.f, 0.35f, 0.9f), 20.f);
-		Txt(C.Name, X + 18.f * UI, Y + 50.f * UI, bMythic ? FLinearColor(1.f, 0.6f, 1.f) : (bSel ? Gold : FLinearColor::White), 30.f);
-		Txt(C.Title, X + 18.f * UI, Y + 92.f * UI, Cyan, 21.f);
+		Txt(C.Name, X + 18.f * UI, Y + 50.f * UI, bMythic ? FLinearColor(1.f, 0.6f, 1.f) : (bSel ? HudGold : FLinearColor::White), bMythic ? 24.f : 28.f);
+		Txt(C.Title, X + 18.f * UI, Y + 92.f * UI, HudCyan, 21.f);
 		float LY = Y + 140.f * UI;
 		for (const FString& L : Wrap(C.Desc, CardW - 36.f * UI, 20.f))
 		{
-			Txt(L, X + 18.f * UI, LY, Dim, 20.f);
+			Txt(L, X + 18.f * UI, LY, HudDim, 20.f);
 			LY += 26.f * UI;
 		}
 		const float SY = Y + CardH - 120.f * UI;
 		const float MaxV = 420.f;
-		Txt(TEXT("Vita"), X + 18.f * UI, SY, Dim, 18.f);
+		Txt(TEXT("Vita"), X + 18.f * UI, SY, HudDim, 18.f);
 		Bar(X + 110.f * UI, SY + 6.f * UI, CardW - 140.f * UI, 10.f * UI, C.HP / MaxV, FLinearColor(0.85f, 0.15f, 0.15f));
-		Txt(TEXT("Mana"), X + 18.f * UI, SY + 30.f * UI, Dim, 18.f);
+		Txt(TEXT("Mana"), X + 18.f * UI, SY + 30.f * UI, HudDim, 18.f);
 		Bar(X + 110.f * UI, SY + 36.f * UI, CardW - 140.f * UI, 10.f * UI, C.MP / MaxV, FLinearColor(0.2f, 0.45f, 1.f));
-		Txt(TEXT("Attacco"), X + 18.f * UI, SY + 60.f * UI, Dim, 18.f);
-		Bar(X + 110.f * UI, SY + 66.f * UI, CardW - 140.f * UI, 10.f * UI, C.Atk / 36.f, Gold);
+		Txt(TEXT("Attacco"), X + 18.f * UI, SY + 60.f * UI, HudDim, 18.f);
+		Bar(X + 110.f * UI, SY + 66.f * UI, CardW - 140.f * UI, 10.f * UI, C.Atk / 36.f, HudGold);
 		if (C.bPredator) Txt(TEXT("Predatore  -  Mimetismo"), X + 18.f * UI, SY + 88.f * UI, FLinearColor(0.4f, 0.9f, 1.f), 17.f);
 	}
 
-	FString Hint = TEXT("[1-4] Scegli classe     [INVIO] Nuova partita");
+	FString Hint = TEXT("[1-5] Scegli classe     [INVIO] Nuova partita");
 	if (GM->bHasSave) Hint += TEXT("     [C] Continua");
 	Txt(Hint, W * 0.5f, H - 105.f * UI, FLinearColor::White, 26.f, true);
-	Txt(TEXT("Gamepad:  D-pad cambia classe   -   A inizia"), W * 0.5f, H - 62.f * UI, Dim, 19.f, true);
+	Txt(TEXT("Gamepad:  D-pad cambia classe   -   A inizia"), W * 0.5f, H - 62.f * UI, HudDim, 19.f, true);
 }
 
 // ============================================================================
@@ -247,15 +254,15 @@ void ASRHUD::DrawStatus(ASlimeCharacter* P)
 	static const TCHAR* Forms[] = { TEXT("Slime"), TEXT("Umano"), TEXT("Lupo Tempesta") };
 	Panel(X - 12.f * UI, Y - 10.f * UI, 470.f * UI, 158.f * UI, FLinearColor(0.f, 0.f, 0.f, 0.4f));
 	Txt(FString::Printf(TEXT("%s   Lv.%d"), SR::Class(P->ClassId).Name, P->Level), X, Y, FLinearColor::White, 24.f);
-	Txt(FString::Printf(TEXT("Forma: %s"), Forms[static_cast<int32>(P->Form)]), X + 300.f * UI, Y + 4.f * UI, Cyan, 17.f);
+	Txt(FString::Printf(TEXT("Forma: %s"), Forms[static_cast<int32>(P->Form)]), X + 300.f * UI, Y + 4.f * UI, HudCyan, 17.f);
 
 	const float BW = 430.f * UI;
 	Bar(X, Y + 38.f * UI, BW, 16.f * UI, P->HP / FMath::Max(1.f, P->MaxHP), FLinearColor(0.85f, 0.12f, 0.12f));
 	Txt(FString::Printf(TEXT("%d / %d"), FMath::RoundToInt(P->HP), FMath::RoundToInt(P->MaxHP)), X + 8.f * UI, Y + 36.f * UI, FLinearColor::White, 15.f);
 	Bar(X, Y + 62.f * UI, BW * 0.85f, 11.f * UI, P->MP / FMath::Max(1.f, P->MaxMP), FLinearColor(0.2f, 0.45f, 1.f));
 	Bar(X, Y + 81.f * UI, BW * 0.7f, 8.f * UI, P->Stamina / FMath::Max(1.f, P->MaxStamina), FLinearColor(0.3f, 0.85f, 0.35f));
-	Bar(X, Y + 97.f * UI, BW, 4.f * UI, P->XP / SR::XPForLevel(P->Level), Gold);
-	Txt(FString::Printf(TEXT("Oro %d     Pozioni %d     Arma +%d     Prede %d"), P->Gold, P->Potions, P->WeaponLevel, P->Absorbed), X, Y + 110.f * UI, Gold, 17.f);
+	Bar(X, Y + 97.f * UI, BW, 4.f * UI, P->XP / SR::XPForLevel(P->Level), HudGold);
+	Txt(FString::Printf(TEXT("Oro %d     Pozioni %d     Arma +%d     Prede %d"), P->Gold, P->Potions, P->WeaponLevel, P->Absorbed), X, Y + 110.f * UI, HudGold, 17.f);
 }
 
 void ASRHUD::DrawSkillBar(ASlimeCharacter* P)
@@ -282,9 +289,9 @@ void ASRHUD::DrawSkillBar(ASlimeCharacter* P)
 			Txt(FString::Printf(TEXT("%.1f"), CD), X + S * 0.5f, Y + S * 0.3f, FLinearColor::White, 18.f, true);
 		}
 		if (P->MP < Info.Mana) Panel(X, Y, S, S, FLinearColor(0.f, 0.f, 0.3f, 0.45f));
-		Frame(X, Y, S, S, bSel ? Gold : FLinearColor(1.f, 1.f, 1.f, 0.3f), bSel ? 3.f : 1.f);
+		Frame(X, Y, S, S, bSel ? HudGold : FLinearColor(1.f, 1.f, 1.f, 0.3f), bSel ? 3.f : 1.f);
 		Txt(FString::FromInt(i + 1), X + 4.f * UI, Y + 2.f * UI, FLinearColor::White, 15.f);
-		Txt(FString::FromInt(FMath::RoundToInt(Info.Mana)), X + S - 24.f * UI, Y + S - 22.f * UI, Cyan, 14.f);
+		Txt(FString::FromInt(FMath::RoundToInt(Info.Mana)), X + S - 24.f * UI, Y + S - 22.f * UI, HudCyan, 14.f);
 	}
 	if (P->Skills.IsValidIndex(P->SelectedSkill))
 	{
@@ -303,7 +310,7 @@ void ASRHUD::DrawSkillBar(ASlimeCharacter* P)
 		const float FX = BX + S + Gap;
 		Panel(FX, Y, S, S, FLinearColor(0.f, 0.f, 0.f, 0.65f));
 		static const TCHAR* Short[] = { TEXT("SLM"), TEXT("UMN"), TEXT("LUP") };
-		Txt(Short[static_cast<int32>(P->Form)], FX + S * 0.5f, Y + S * 0.32f, Cyan, 17.f, true);
+		Txt(Short[static_cast<int32>(P->Form)], FX + S * 0.5f, Y + S * 0.32f, HudCyan, 17.f, true);
 		Frame(FX, Y, S, S, FLinearColor(0.4f, 0.8f, 1.f, 0.5f));
 		Txt(TEXT("G"), FX + 4.f * UI, Y + 2.f * UI, FLinearColor::White, 15.f);
 	}
@@ -360,11 +367,11 @@ void ASRHUD::DrawCompass(ASlimeCharacter* P, ASRGameMode* GM)
 	{
 		if (const FSRQuest* Q = GM->ActiveQuest())
 		{
-			if (GM->QuestProgress >= Q->Need) Marker(ASRGameMode::GuildSpot, Gold, 14.f);
+			if (GM->QuestProgress >= Q->Need) Marker(ASRGameMode::GuildSpot, HudGold, 14.f);
 			else if (SR::Zones().IsValidIndex(Q->Zone))
 			{
 				const FVector2D C = SR::Zones()[Q->Zone].Center;
-				Marker(FVector(C.X, C.Y, 0.f), Gold, 14.f);
+				Marker(FVector(C.X, C.Y, 0.f), HudGold, 14.f);
 			}
 		}
 		else
@@ -374,12 +381,19 @@ void ASRHUD::DrawCompass(ASlimeCharacter* P, ASRGameMode* GM)
 	}
 
 	// Clock & region
-	if (GM && GM->GetSRWorld())
+	if (P->bInDungeon && GM && GM->Dungeon)
+	{
+		const FString Info = GM->Dungeon->IsCleared()
+			? FString::Printf(TEXT("Torre dei Mille Piani  -  Piano %d  -  portale aperto!"), GM->Dungeon->Floor)
+			: FString::Printf(TEXT("Torre dei Mille Piani  -  Piano %d  -  nemici rimasti: %d"), GM->Dungeon->Floor, GM->Dungeon->EnemiesLeft());
+		Txt(Info, CX, Y + CH + 6.f * UI, HudGold, 18.f, true);
+	}
+	else if (GM && GM->GetSRWorld())
 	{
 		const float T = GM->GetSRWorld()->TimeOfDay;
 		const int32 Hh = FMath::FloorToInt(T), Mm = FMath::FloorToInt((T - Hh) * 60.f);
 		const FString Clock = FString::Printf(TEXT("%s  %02d:%02d   -   %s"), GM->GetSRWorld()->IsNight() ? TEXT("Notte") : TEXT("Giorno"), Hh, Mm, *SR::RegionName(Me));
-		Txt(Clock, CX, Y + CH + 6.f * UI, Dim, 17.f, true);
+		Txt(Clock, CX, Y + CH + 6.f * UI, HudDim, 17.f, true);
 	}
 }
 
@@ -389,25 +403,25 @@ void ASRHUD::DrawQuest(ASlimeCharacter* P, ASRGameMode* GM)
 	const float W = Canvas->ClipX;
 	const float PW = 420.f * UI, X = W - PW - 28.f * UI, Y = 26.f * UI;
 	Panel(X - 12.f * UI, Y - 8.f * UI, PW + 24.f * UI, 120.f * UI, FLinearColor(0.f, 0.f, 0.f, 0.4f));
-	Txt(TEXT("MISSIONE"), X, Y, Gold, 18.f);
+	Txt(TEXT("MISSIONE"), X, Y, HudGold, 18.f);
 	if (const FSRQuest* Q = GM->ActiveQuest())
 	{
 		Txt(Q->Title, X, Y + 26.f * UI, FLinearColor::White, 22.f);
 		const bool bDone = GM->QuestProgress >= Q->Need;
 		Txt(bDone ? FString(TEXT("Completata! Torna da Brann alla Gilda."))
 			: FString::Printf(TEXT("%s: %d / %d"), SR::Enemy(Q->Target).Name, GM->QuestProgress, Q->Need),
-			X, Y + 56.f * UI, bDone ? FLinearColor(0.5f, 1.f, 0.5f) : Dim, 18.f);
+			X, Y + 56.f * UI, bDone ? FLinearColor(0.5f, 1.f, 0.5f) : HudDim, 18.f);
 		if (!bDone && SR::Zones().IsValidIndex(Q->Zone))
 		{
 			const FVector2D C = SR::Zones()[Q->Zone].Center;
 			const float D = FVector::Dist2D(P->GetActorLocation(), FVector(C.X, C.Y, 0.f)) / 100.f;
-			Txt(FString::Printf(TEXT("%s  -  %d m"), *SR::Zones()[Q->Zone].Name, FMath::RoundToInt(D)), X, Y + 82.f * UI, Gold, 16.f);
+			Txt(FString::Printf(TEXT("%s  -  %d m"), *SR::Zones()[Q->Zone].Name, FMath::RoundToInt(D)), X, Y + 82.f * UI, HudGold, 16.f);
 		}
 	}
 	else if (SR::Quests().IsValidIndex(GM->QuestIndex))
 	{
 		Txt(TEXT("Parla con Brann alla Gilda"), X, Y + 26.f * UI, FLinearColor::White, 21.f);
-		Txt(TEXT("(sud-ovest della fontana di Altheria)"), X, Y + 56.f * UI, Dim, 17.f);
+		Txt(TEXT("(sud-ovest della fontana di Altheria)"), X, Y + 56.f * UI, HudDim, 17.f);
 	}
 	else
 	{
@@ -434,7 +448,7 @@ void ASRHUD::DrawWorldMarkers(ASlimeCharacter* P)
 			{
 				const float Bob = FMath::Sin(Time * 4.f) * 4.f * UI;
 				DrawRect(FLinearColor(0.3f, 0.8f, 1.f, 0.85f), S.X - 6.f * UI, S.Y - 6.f * UI + Bob, 12.f * UI, 12.f * UI);
-				if (D < 600.f) Txt(P->IsPredator() ? TEXT("E  Predazione") : TEXT("E  Saccheggia"), S.X, S.Y - 34.f * UI, Cyan, 16.f, true);
+				if (D < 600.f) Txt(P->IsPredator() ? TEXT("E  Predazione") : TEXT("E  Saccheggia"), S.X, S.Y - 34.f * UI, HudCyan, 16.f, true);
 			}
 			continue;
 		}
@@ -522,7 +536,7 @@ void ASRHUD::DrawDialog(ASlimeCharacter* P)
 	const float A = FMath::Clamp(P->DialogTime / 0.4f, 0.f, 1.f);
 	Panel(X, Y, PW, PH, FLinearColor(0.02f, 0.02f, 0.04f, 0.82f * A));
 	Frame(X, Y, PW, PH, FLinearColor(1.f, 0.8f, 0.4f, 0.5f * A));
-	Txt(P->DialogSpeaker, X + 30.f * UI, Y + 14.f * UI, FLinearColor(Gold.R, Gold.G, Gold.B, A), 24.f);
+	Txt(P->DialogSpeaker, X + 30.f * UI, Y + 14.f * UI, FLinearColor(HudGold.R, HudGold.G, HudGold.B, A), 24.f);
 	float LY = Y + 50.f * UI;
 	for (const FString& L : Lines)
 	{
@@ -533,7 +547,7 @@ void ASRHUD::DrawDialog(ASlimeCharacter* P)
 
 void ASRHUD::DrawOracle(float Dt)
 {
-	float Y = 200.f * UI;
+	float Y = 262.f * UI;
 	const float X = 28.f * UI;
 	for (int32 i = Oracle.Num() - 1; i >= 0; --i)
 	{
@@ -546,8 +560,8 @@ void ASRHUD::DrawOracle(float Dt)
 		const TArray<FString> Lines = Wrap(L.Text, 560.f * UI, 19.f);
 		const float H = (34.f + Lines.Num() * 24.f) * UI;
 		Panel(X - 10.f * UI, Y, 600.f * UI, H, FLinearColor(0.f, 0.05f, 0.1f, 0.55f * A));
-		DrawRect(FLinearColor(Cyan.R, Cyan.G, Cyan.B, 0.8f * A), X - 10.f * UI, Y, 3.f * UI, H);
-		Txt(TEXT("<< Il Saggio >>"), X, Y + 6.f * UI, FLinearColor(Cyan.R, Cyan.G, Cyan.B, A), 16.f);
+		DrawRect(FLinearColor(HudCyan.R, HudCyan.G, HudCyan.B, 0.8f * A), X - 10.f * UI, Y, 3.f * UI, H);
+		Txt(TEXT("<< Il Saggio >>"), X, Y + 6.f * UI, FLinearColor(HudCyan.R, HudCyan.G, HudCyan.B, A), 16.f);
 		float LY = Y + 28.f * UI;
 		for (const FString& S : Lines)
 		{
@@ -575,13 +589,81 @@ void ASRHUD::DrawToast(float Dt)
 void ASRHUD::DrawKeyHints()
 {
 	const float H = Canvas->ClipY;
-	Txt(TEXT("WASD muovi  Spazio salta  Shift corri  Q schiva  Mouse attacco/pesante  R abilita'  T cambia  E predazione  F interagisci  G forma  H pozione  Rotella blocca  F1 aiuto"),
+	Txt(TEXT("WASD muovi  Spazio salta  Shift corri  Q schiva  Mouse attacco/pesante  R abilita'  T cambia  E predazione  F interagisci  G forma  H pozione  I inventario  F1 aiuto"),
 		28.f * UI, H - 28.f * UI, FLinearColor(1.f, 1.f, 1.f, 0.55f), 14.f);
 }
 
 // ============================================================================
 // Overlays
 // ============================================================================
+
+void ASRHUD::DrawParty(ASlimeCharacter* P, ASRGameMode* GM)
+{
+	if (!GM) return;
+	float Y = 186.f * UI;
+	const float X = 28.f * UI;
+	bool bAny = false;
+	for (const ASRCompanion* C : GM->Companions)
+	{
+		if (!C || !C->bRecruited) continue;
+		bAny = true;
+		Txt(FString::Printf(TEXT("%s%s"), *C->DisplayName(), C->bMarried ? TEXT("  (sposata)") : TEXT("")), X, Y, FLinearColor(1.f, 0.75f, 0.85f), 16.f);
+		Bar(X + 330.f * UI, Y + 6.f * UI, 110.f * UI, 6.f * UI, C->Affection / 100.f, FLinearColor(1.f, 0.4f, 0.6f));
+		Y += 22.f * UI;
+	}
+	if (P->bSwimming)
+	{
+		Txt(TEXT("Stai nuotando  -  la stamina cala"), X, Y + (bAny ? 4.f : 0.f) * UI, FLinearColor(0.5f, 0.85f, 1.f), 16.f);
+	}
+}
+
+void ASRHUD::DrawInventory(ASlimeCharacter* P)
+{
+	const float W = Canvas->ClipX, H = Canvas->ClipY;
+	const float PW = 1100.f * UI, PH = 720.f * UI;
+	const float X = W * 0.5f - PW * 0.5f, Y = H * 0.5f - PH * 0.5f;
+	Panel(X, Y, PW, PH, FLinearColor(0.02f, 0.02f, 0.03f, 0.92f));
+	Frame(X, Y, PW, PH, HudGold, 2.f);
+	Txt(TEXT("INVENTARIO"), W * 0.5f, Y + 16.f * UI, HudGold, 30.f, true);
+	Txt(FString::Printf(TEXT("Attacco %d   Difesa %d   Critico %d%%   Vita %d   Mana %d   Oro %d"),
+		FMath::RoundToInt(P->GetAttack()), FMath::RoundToInt(P->GetDefense()), FMath::RoundToInt(P->GetCrit() * 100.f),
+		FMath::RoundToInt(P->MaxHP), FMath::RoundToInt(P->MaxMP), P->Gold), W * 0.5f, Y + 60.f * UI, FLinearColor::White, 19.f, true);
+
+	static const TCHAR* Slots[] = { TEXT("Arma"), TEXT("Armatura"), TEXT("Anello") };
+	float LY = Y + 104.f * UI;
+	for (int32 s = 0; s < 3; ++s)
+	{
+		const FSRItem& E = P->Equipped[s];
+		Txt(Slots[s], X + 40.f * UI, LY, HudDim, 18.f);
+		if (E.IsValid())
+		{
+			Txt(FString::Printf(TEXT("%s  [%s]"), *E.Name, SR::RarityName(E.Rarity)), X + 200.f * UI, LY, SR::RarityColor(E.Rarity), 19.f);
+			Txt(SR::ItemStats(E), X + 700.f * UI, LY, HudDim, 17.f);
+		}
+		else
+		{
+			Txt(TEXT("-  vuoto  -"), X + 200.f * UI, LY, FLinearColor(0.5f, 0.5f, 0.5f), 18.f);
+		}
+		LY += 32.f * UI;
+	}
+	DrawLine(X + 30.f * UI, LY + 6.f * UI, X + PW - 30.f * UI, LY + 6.f * UI, FLinearColor(1.f, 0.85f, 0.5f, 0.4f), 1.f);
+	LY += 20.f * UI;
+	const int32 Pages = FMath::Max(1, (ASlimeCharacter::BagSize + 8) / 9);
+	Txt(FString::Printf(TEXT("Borsa  %d / %d     pagina %d / %d"), P->Bag.Num(), ASlimeCharacter::BagSize, P->InvPage + 1, Pages), X + 40.f * UI, LY, HudGold, 19.f);
+	LY += 34.f * UI;
+	for (int32 k = 0; k < 9; ++k)
+	{
+		const int32 Idx = P->InvPage * 9 + k;
+		if (!P->Bag.IsValidIndex(Idx)) break;
+		const FSRItem& It = P->Bag[Idx];
+		const FSRItem& Cur = P->Equipped[static_cast<int32>(It.Slot)];
+		const bool bBetter = It.Score() > Cur.Score();
+		Txt(FString::Printf(TEXT("%d.  %s  [%s]%s"), k + 1, *It.Name, SR::RarityName(It.Rarity), bBetter ? TEXT("  +") : TEXT("")), X + 40.f * UI, LY, SR::RarityColor(It.Rarity), 19.f);
+		Txt(FString::Printf(TEXT("%s  %d oro"), *SR::ItemStats(It), It.Value), X + 640.f * UI, LY, bBetter ? FLinearColor(0.5f, 1.f, 0.5f) : HudDim, 16.f);
+		LY += 34.f * UI;
+	}
+	Txt(TEXT("1-9 equipaggia   -   T pagina successiva   -   I / F chiudi   -   Elia al mercato compra il bottino"), W * 0.5f, Y + PH - 40.f * UI, HudDim, 17.f, true);
+}
 
 void ASRHUD::DrawGraceMenu(ASlimeCharacter* P)
 {
@@ -590,15 +672,15 @@ void ASRHUD::DrawGraceMenu(ASlimeCharacter* P)
 	const float PW = 560.f * UI, PH = (110.f + G.Num() * 40.f) * UI;
 	const float X = W * 0.5f - PW * 0.5f, Y = H * 0.5f - PH * 0.5f;
 	Panel(X, Y, PW, PH, FLinearColor(0.03f, 0.02f, 0.f, 0.88f));
-	Frame(X, Y, PW, PH, Gold, 2.f);
-	Txt(TEXT("GRAZIA  -  Viaggio rapido"), W * 0.5f, Y + 18.f * UI, Gold, 28.f, true);
+	Frame(X, Y, PW, PH, HudGold, 2.f);
+	Txt(TEXT("GRAZIA  -  Viaggio rapido"), W * 0.5f, Y + 18.f * UI, HudGold, 28.f, true);
 	for (int32 i = 0; i < G.Num(); ++i)
 	{
 		const bool bKnown = P->GraceFound.IsValidIndex(i) && P->GraceFound[i];
 		const FString Line = FString::Printf(TEXT("%d.  %s"), i + 1, bKnown ? *G[i].Name : TEXT("? ? ?"));
-		Txt(Line, X + 40.f * UI, Y + (70.f + i * 40.f) * UI, i == P->LastGrace ? Gold : (bKnown ? FLinearColor::White : FLinearColor(0.5f, 0.5f, 0.5f)), 23.f);
+		Txt(Line, X + 40.f * UI, Y + (70.f + i * 40.f) * UI, i == P->LastGrace ? HudGold : (bKnown ? FLinearColor::White : FLinearColor(0.5f, 0.5f, 0.5f)), 23.f);
 	}
-	Txt(TEXT("Premi il numero per viaggiare  -  F per chiudere"), W * 0.5f, Y + PH - 36.f * UI, Dim, 17.f, true);
+	Txt(TEXT("Premi il numero per viaggiare  -  F per chiudere"), W * 0.5f, Y + PH - 36.f * UI, HudDim, 17.f, true);
 }
 
 void ASRHUD::DrawHelp()
@@ -614,6 +696,9 @@ void ASRHUD::DrawHelp()
 		TEXT("G / D-pad giu'  -  Mimetismo: Slime > Umano > Lupo Tempesta"),
 		TEXT("F / D-pad su  -  Parla, compra, riposa alla Grazia (salva + viaggio rapido)"),
 		TEXT("H / D-pad sinistra  -  Pozione curativa          Rotella  -  Zoom camera"),
+		TEXT("I / Tab  -  Inventario: armi, armature e anelli trovati sui nemici"),
+		TEXT("Kaede, Liora e Rhea vivono ad Altheria: parla con loro per farle unire al gruppo."),
+		TEXT("Torre dei Mille Piani: fuori dalla porta est. Libera ogni piano per salire."),
 		TEXT(""),
 		TEXT("Gilda (Brann): missioni.  Mercato (Elia): pozioni.  Fabbro (Torvin): potenzia l'arma."),
 		TEXT("Cattedrale (Lyra): cure gratuite.  Le zone piu' lontane hanno nemici piu' forti."),
@@ -621,8 +706,8 @@ void ASRHUD::DrawHelp()
 	const float PW = 1100.f * UI, PH = (100.f + UE_ARRAY_COUNT(Lines) * 34.f) * UI;
 	const float X = W * 0.5f - PW * 0.5f, Y = H * 0.5f - PH * 0.5f;
 	Panel(X, Y, PW, PH, FLinearColor(0.f, 0.f, 0.02f, 0.9f));
-	Frame(X, Y, PW, PH, Cyan, 2.f);
-	Txt(TEXT("COMANDI"), W * 0.5f, Y + 18.f * UI, Cyan, 30.f, true);
+	Frame(X, Y, PW, PH, HudCyan, 2.f);
+	Txt(TEXT("COMANDI"), W * 0.5f, Y + 18.f * UI, HudCyan, 30.f, true);
 	for (int32 i = 0; i < static_cast<int32>(UE_ARRAY_COUNT(Lines)); ++i)
 	{
 		Txt(Lines[i], X + 40.f * UI, Y + (74.f + i * 34.f) * UI, FLinearColor::White, 20.f);

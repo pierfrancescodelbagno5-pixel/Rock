@@ -8,6 +8,8 @@
 class ASlimeCharacter;
 class ASREnemy;
 class ASRWorld;
+class ASRDungeon;
+class ASRCompanion;
 
 /** Builds the world, runs the title menu, quests, monster spawning and saving. */
 UCLASS()
@@ -30,6 +32,11 @@ public:
 	void OnRest();
 	const FSRQuest* ActiveQuest() const;
 	ASRWorld* GetSRWorld() const { return SRWorld; }
+	/** Counts married companions and applies the spouse bonus to the player. */
+	void RefreshSpouses();
+
+	UPROPERTY() TObjectPtr<ASRDungeon> Dungeon;
+	UPROPERTY() TArray<TObjectPtr<ASRCompanion>> Companions;
 
 	bool bInMenu = true;
 	int32 MenuClass = 3;
@@ -51,6 +58,7 @@ private:
 	};
 
 	void UpdateSpawns();
+	void SpawnCompanions();
 	ASlimeCharacter* GetPlayer() const;
 
 	TArray<FZoneState> ZoneStates;

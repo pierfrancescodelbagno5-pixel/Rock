@@ -5,6 +5,8 @@
 #include "SRGameMode.h"
 #include "SRProjectile.h"
 #include "SRFx.h"
+#include "SRCompanion.h"
+#include "SRDungeon.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -37,6 +39,8 @@ ASlimeCharacter::ASlimeCharacter()
 	M->BrakingDecelerationWalking = 2600.f;
 	M->GravityScale = 1.6f;
 	M->MaxAcceleration = 3000.f;
+	M->BrakingDecelerationFlying = 1600.f;
+	M->MaxFlySpeed = 380.f;
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
@@ -135,6 +139,10 @@ void ASlimeCharacter::BuildHuman()
 		S.Hair = SR::Hex(0xe6e6f2); S.bLongHair = true; S.Shirt = SR::Hex(0x3a2a6a); S.bSkirt = true; S.bCape = true; S.Cape = SR::Hex(0x5a3a9a);
 		S.Accent = FLinearColor(0.25f, 0.75f, 1.f); S.Weapon = 3; S.Eyes = SR::Hex(0x3a6ab0);
 		break;
+	case ESRClass::Archer:
+		S.Hair = SR::Hex(0xd8c070); S.bLongHair = true; S.bPointyEars = true; S.Shirt = SR::Hex(0x2f5a2a); S.Pants = SR::Hex(0x3a3020);
+		S.bCape = true; S.Cape = SR::Hex(0x3a4a22); S.Accent = SR::Hex(0x9a7a3a); S.Weapon = 7; S.Eyes = SR::Hex(0x3a8a3a);
+		break;
 	case ESRClass::Emperor:
 		S.Hair = SR::Hex(0x101018); S.bLongHair = true; S.Skin = SR::Hex(0xf0d6c0);
 		S.Eyes = FLinearColor(1.f, 0.25f, 0.05f); S.bGlowEyes = true;
@@ -189,6 +197,8 @@ void ASlimeCharacter::SetupPlayerInputComponent(UInputComponent* IC)
 	IC->BindKey(EKeys::Enter, IE_Pressed, this, &ASlimeCharacter::MenuStart);
 	IC->BindKey(EKeys::C, IE_Pressed, this, &ASlimeCharacter::MenuContinue);
 	IC->BindKey(EKeys::Gamepad_Special_Right, IE_Pressed, this, &ASlimeCharacter::MenuStart);
+	IC->BindKey(EKeys::I, IE_Pressed, this, &ASlimeCharacter::ToggleInventory);
+	IC->BindKey(EKeys::Tab, IE_Pressed, this, &ASlimeCharacter::ToggleInventory);
 }
 
 ASRHUD* ASlimeCharacter::GetSRHUD() const
@@ -210,12 +220,17 @@ bool ASlimeCharacter::InMenu() const
 
 bool ASlimeCharacter::CanAct() const
 {
-	return !InMenu() && !bDead && !bGraceMenu;
+	return !InMenu() && !bDead && !bGraceMenu && !bShowInventory;
 }
 
 // ============================================================================
 // Progression
 // ============================================================================
+
+static int32 CycleClass(int32 Current, int32 Dir)
+{
+	return static_cast<int32>(SR::ClassAt(SR::ClassDisplayIndex(static_cast<ESRClass>(Current)) + Dir));
+}
 
 static void SkillsForLevel(ESRClass C, int32 L, TArray<ESRSkill>& Out)
 {
@@ -238,6 +253,13 @@ static void SkillsForLevel(ESRClass C, int32 L, TArray<ESRSkill>& Out)
 		if (L == 5) Out.Add(ESRSkill::FireBreath);
 		if (L == 7) Out.Add(ESRSkill::Regen);
 		if (L == 10) Out.Add(ESRSkill::StickyThread);
+		break;
+	case ESRClass::Archer:
+		if (L == 1) Out.Add(ESRSkill::PiercingArrow);
+		if (L == 3) Out.Add(ESRSkill::ArrowRain);
+		if (L == 5) Out.Add(ESRSkill::StickyThread);
+		if (L == 7) Out.Add(ESRSkill::Regen);
+		if (L == 10) Out.Add(ESRSkill::Thunder);
 		break;
 	case ESRClass::Emperor:
 		if (L == 1)
@@ -277,6 +299,9 @@ void ASlimeCharacter::ApplyClass(ESRClass NewClass, bool bFresh)
 		SkillsForLevel(NewClass, 1, Start);
 		for (ESRSkill S : Start) LearnSkill(S, false);
 		for (float& C : Cooldowns) C = 0.f;
+		Bag.Reset();
+		for (FSRItem& E : Equipped) E = FSRItem();
+		bInDungeon = false;
 	}
 	SlimeColor = NewClass == ESRClass::Emperor ? FLinearColor(0.35f, 0.12f, 1.f) : FLinearColor(0.08f, 0.45f, 1.f);
 	if (SlimeMid) SlimeMid->SetVectorParameterValue(TEXT("Color"), SlimeColor);
@@ -295,8 +320,15 @@ void ASlimeCharacter::Recalc()
 {
 	const FSRClassInfo& C = SR::Class(ClassId);
 	const float L = static_cast<float>(Level - 1);
-	MaxHP = C.HP * (1.f + 0.12f * L) + BonusHP;
-	MaxMP = C.MP * (1.f + 0.08f * L);
+	float ItemHP = 0.f, ItemMP = 0.f;
+	for (const FSRItem& E : Equipped)
+	{
+		if (!E.IsValid()) continue;
+		ItemHP += E.HP;
+		ItemMP += E.MP;
+	}
+	MaxHP = (C.HP * (1.f + 0.12f * L) + BonusHP + ItemHP) * (1.f + 0.08f * SpouseCount);
+	MaxMP = C.MP * (1.f + 0.08f * L) + ItemMP;
 	MaxStamina = 100.f + L * 3.f;
 	HP = FMath::Min(HP, MaxHP);
 	MP = FMath::Min(MP, MaxMP);
@@ -305,7 +337,80 @@ void ASlimeCharacter::Recalc()
 float ASlimeCharacter::GetAttack() const
 {
 	const FSRClassInfo& C = SR::Class(ClassId);
-	return C.Atk * (1.f + 0.1f * (Level - 1)) + WeaponLevel * 4.f + Absorbed * 0.15f;
+	float ItemAtk = 0.f;
+	for (const FSRItem& E : Equipped)
+	{
+		if (E.IsValid()) ItemAtk += E.Atk;
+	}
+	return (C.Atk * (1.f + 0.1f * (Level - 1)) + WeaponLevel * 4.f + Absorbed * 0.15f + ItemAtk) * (1.f + 0.08f * SpouseCount);
+}
+
+float ASlimeCharacter::GetDefense() const
+{
+	float D = WeaponLevel * 0.5f;
+	for (const FSRItem& E : Equipped)
+	{
+		if (E.IsValid()) D += E.Def;
+	}
+	return D;
+}
+
+float ASlimeCharacter::GetCrit() const
+{
+	float C = 0.12f;
+	for (const FSRItem& E : Equipped)
+	{
+		if (E.IsValid()) C += E.Crit;
+	}
+	return FMath::Min(C, 0.75f);
+}
+
+bool ASlimeCharacter::PickUp(const FSRItem& Item)
+{
+	if (!Item.IsValid()) return true;
+	const int32 Slot = static_cast<int32>(Item.Slot);
+	if (!Equipped[Slot].IsValid())
+	{
+		Equipped[Slot] = Item;
+		Recalc();
+		Oracle(FString::Printf(TEXT("Equipaggiato: %s [%s]  %s"), *Item.Name, SR::RarityName(Item.Rarity), *SR::ItemStats(Item)));
+		return true;
+	}
+	if (Bag.Num() >= BagSize)
+	{
+		if (BagFullWarn <= 0.f)
+		{
+			Oracle(TEXT("Borsa piena! Vendi il bottino a Elia al mercato di Altheria."));
+			BagFullWarn = 8.f;
+		}
+		return false;
+	}
+	Bag.Add(Item);
+	if (Item.Rarity >= 2) Toast(FString(SR::RarityName(Item.Rarity)).ToUpper(), Item.Name);
+	const bool bBetter = Item.Score() > Equipped[Slot].Score();
+	Oracle(FString::Printf(TEXT("Raccolto: %s [%s]%s  (I per l'inventario)"), *Item.Name, SR::RarityName(Item.Rarity), bBetter ? TEXT(" - migliore del tuo!") : TEXT("")));
+	return true;
+}
+
+void ASlimeCharacter::EquipFromBag(int32 Index)
+{
+	if (!Bag.IsValidIndex(Index)) return;
+	const FSRItem It = Bag[Index];
+	const int32 Slot = static_cast<int32>(It.Slot);
+	if (Equipped[Slot].IsValid()) Bag[Index] = Equipped[Slot];
+	else Bag.RemoveAt(Index);
+	Equipped[Slot] = It;
+	Recalc();
+	Oracle(FString::Printf(TEXT("Equipaggiato: %s  %s"), *It.Name, *SR::ItemStats(It)));
+}
+
+int32 ASlimeCharacter::SellBag()
+{
+	int32 Total = 0;
+	for (const FSRItem& It : Bag) Total += It.Value;
+	Bag.Reset();
+	Gold += Total;
+	return Total;
 }
 
 void ASlimeCharacter::GiveXP(float Amount)
@@ -488,13 +593,18 @@ void ASlimeCharacter::OnNumber(int32 N)
 	{
 		if (GM->bInMenu)
 		{
-			if (N >= 1 && N <= 4) GM->MenuClass = N - 1;
+			if (N >= 1 && N <= SR::NumClasses) GM->MenuClass = static_cast<int32>(SR::ClassAt(N - 1));
 			return;
 		}
 	}
 	if (bGraceMenu)
 	{
 		TravelToGrace(N - 1);
+		return;
+	}
+	if (bShowInventory)
+	{
+		EquipFromBag(InvPage * 9 + N - 1);
 		return;
 	}
 	if (Skills.IsValidIndex(N - 1)) SelectedSkill = N - 1;
@@ -504,10 +614,22 @@ void ASlimeCharacter::NextSkill()
 {
 	if (InMenu())
 	{
-		if (ASRGameMode* GM = GetGM()) GM->MenuClass = (GM->MenuClass + 1) % 4;
+		if (ASRGameMode* GM = GetGM()) GM->MenuClass = CycleClass(GM->MenuClass, 1);
+		return;
+	}
+	if (bShowInventory)
+	{
+		InvPage = (InvPage + 1) % FMath::Max(1, (BagSize + 8) / 9);
 		return;
 	}
 	if (Skills.Num() > 0) SelectedSkill = (SelectedSkill + 1) % Skills.Num();
+}
+
+void ASlimeCharacter::ToggleInventory()
+{
+	if (InMenu() || bDead) return;
+	bShowInventory = !bShowInventory;
+	bGraceMenu = false;
 }
 
 void ASlimeCharacter::ToggleLock()
@@ -524,7 +646,7 @@ void ASlimeCharacter::UsePotion()
 {
 	if (InMenu())
 	{
-		if (ASRGameMode* GM = GetGM()) GM->MenuClass = (GM->MenuClass + 3) % 4;
+		if (ASRGameMode* GM = GetGM()) GM->MenuClass = CycleClass(GM->MenuClass, -1);
 		return;
 	}
 	if (!CanAct() || PotionCooldown > 0.f) return;
@@ -545,7 +667,7 @@ void ASlimeCharacter::Transform()
 {
 	if (InMenu())
 	{
-		if (ASRGameMode* GM = GetGM()) GM->MenuClass = (GM->MenuClass + 1) % 4;
+		if (ASRGameMode* GM = GetGM()) GM->MenuClass = CycleClass(GM->MenuClass, 1);
 		return;
 	}
 	if (!CanAct() || AttackTime >= 0.f) return;
@@ -569,6 +691,18 @@ ASRNPC* ASlimeCharacter::FindNPC(float MaxDist) const
 	ASRNPC* Best = nullptr;
 	float BestD = MaxDist;
 	for (TActorIterator<ASRNPC> It(GetWorld()); It; ++It)
+	{
+		const float D = FVector::Dist(It->GetActorLocation(), GetActorLocation());
+		if (D < BestD) { BestD = D; Best = *It; }
+	}
+	return Best;
+}
+
+ASRCompanion* ASlimeCharacter::FindCompanion(float MaxDist) const
+{
+	ASRCompanion* Best = nullptr;
+	float BestD = MaxDist;
+	for (TActorIterator<ASRCompanion> It(GetWorld()); It; ++It)
 	{
 		const float D = FVector::Dist(It->GetActorLocation(), GetActorLocation());
 		if (D < BestD) { BestD = D; Best = *It; }
@@ -620,7 +754,28 @@ ASREnemy* ASlimeCharacter::FindTarget(float MaxDist, float MinDot) const
 
 FString ASlimeCharacter::GetInteractPrompt() const
 {
-	if (InMenu() || bDead || bGraceMenu) return FString();
+	if (InMenu() || bDead || bGraceMenu || bShowInventory) return FString();
+	if (const ASRCompanion* Cmp = FindCompanion(330.f))
+	{
+		return FString::Printf(TEXT("[F] Parla  -  %s  (affetto %d%s)"), *Cmp->DisplayName(), FMath::RoundToInt(Cmp->Affection), Cmp->bMarried ? TEXT(", sposata") : TEXT(""));
+	}
+	if (const ASRGameMode* GM = GetGM())
+	{
+		if (bInDungeon && GM->Dungeon)
+		{
+			const int32 Portal = GM->Dungeon->PortalNear(GetActorLocation());
+			if (Portal == 1)
+			{
+				return GM->Dungeon->IsCleared() ? FString::Printf(TEXT("[F] Sali al piano %d"), GM->Dungeon->Floor + 1)
+					: FString::Printf(TEXT("Portale sigillato: nemici rimasti %d"), GM->Dungeon->EnemiesLeft());
+			}
+			if (Portal == 2) return TEXT("[F] Esci dalla Torre");
+		}
+		else if (FVector::Dist2D(GetActorLocation(), SR::TowerDoor()) < 520.f && GM->Dungeon)
+		{
+			return FString::Printf(TEXT("[F] Entra nella Torre dei Mille Piani  (piano %d)"), GM->Dungeon->StartFloor());
+		}
+	}
 	if (const ASRNPC* N = FindNPC(330.f))
 	{
 		return FString::Printf(TEXT("[F] %s  -  %s"), *N->PromptVerb(), *N->NPCName);
@@ -638,7 +793,7 @@ void ASlimeCharacter::Interact()
 {
 	if (InMenu())
 	{
-		if (ASRGameMode* GM = GetGM()) GM->MenuClass = (GM->MenuClass + 1) % 4;
+		if (ASRGameMode* GM = GetGM()) GM->MenuClass = CycleClass(GM->MenuClass, 1);
 		return;
 	}
 	if (bDead) return;
@@ -646,6 +801,44 @@ void ASlimeCharacter::Interact()
 	{
 		bGraceMenu = false;
 		return;
+	}
+	if (bShowInventory)
+	{
+		bShowInventory = false;
+		return;
+	}
+	if (ASRCompanion* Cmp = FindCompanion(330.f))
+	{
+		Say(Cmp->DisplayName(), Cmp->Interact(this));
+		if (ASRGameMode* GM = GetGM()) GM->RefreshSpouses();
+		return;
+	}
+	if (ASRGameMode* GM = GetGM())
+	{
+		if (GM->Dungeon)
+		{
+			if (bInDungeon)
+			{
+				const int32 Portal = GM->Dungeon->PortalNear(GetActorLocation());
+				if (Portal == 1)
+				{
+					if (GM->Dungeon->IsCleared()) GM->Dungeon->NextFloor(this);
+					else Oracle(FString::Printf(TEXT("Il portale e' sigillato: sconfiggi i %d nemici rimasti."), GM->Dungeon->EnemiesLeft()));
+					return;
+				}
+				if (Portal == 2)
+				{
+					GM->Dungeon->Exit(this, true);
+					GM->SaveProgress();
+					return;
+				}
+			}
+			else if (FVector::Dist2D(GetActorLocation(), SR::TowerDoor()) < 520.f)
+			{
+				GM->Dungeon->Enter(this);
+				return;
+			}
+		}
 	}
 	if (ASRNPC* N = FindNPC(330.f))
 	{
@@ -693,6 +886,20 @@ void ASlimeCharacter::TeleportTo(const FVector& Location)
 	SetActorLocation(P, false, nullptr, ETeleportType::TeleportPhysics);
 	GetCharacterMovement()->StopMovementImmediately();
 	LastSafe = P;
+	ASRFx::Spawn(GetWorld(), ESRFxKind::Pillar, P, FLinearColor(1.f, 0.8f, 0.4f), 100.f, 0.8f);
+}
+
+void ASlimeCharacter::TeleportExact(const FVector& FloorPoint)
+{
+	const FVector P = FloorPoint + FVector(0, 0, GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() + 30.f);
+	SetActorLocation(P, false, nullptr, ETeleportType::TeleportPhysics);
+	GetCharacterMovement()->StopMovementImmediately();
+	if (bSwimming)
+	{
+		bSwimming = false;
+		GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+	}
+	if (!bInDungeon) LastSafe = P;
 	ASRFx::Spawn(GetWorld(), ESRFxKind::Pillar, P, FLinearColor(1.f, 0.8f, 0.4f), 100.f, 0.8f);
 }
 
@@ -780,7 +987,7 @@ int32 ASlimeCharacter::MeleeHit(float Range, float MinDot, float Damage, float K
 		const FVector To = E->GetActorLocation() - Me;
 		if (To.Size2D() > Range + E->GetRadius() || FMath::Abs(To.Z) > 300.f + E->GetRadius()) continue;
 		if (FVector::DotProduct(Fwd, To.GetSafeNormal2D()) < MinDot) continue;
-		const bool bCrit = FMath::FRand() < 0.12f;
+		const bool bCrit = FMath::FRand() < GetCrit();
 		const float Dmg = Damage * (bCrit ? 1.8f : 1.f) * FMath::FRandRange(0.92f, 1.08f);
 		E->TakeHit(Dmg, this, Knockback, bHeavy);
 		OnDealtDamage(E, Dmg, bCrit);
@@ -793,6 +1000,19 @@ int32 ASlimeCharacter::MeleeHit(float Range, float MinDot, float Damage, float K
 		Shake(bHeavy ? 10.f : 4.f, 0.18f);
 	}
 	return Hits;
+}
+
+void ASlimeCharacter::FireArrows(bool bHeavy)
+{
+	const FVector Aim = AimDirection();
+	const FVector From = GetActorLocation() + GetActorForwardVector() * 60.f + FVector(0, 0, 40.f);
+	const float Dmg = GetAttack() * (bHeavy ? 1.5f : 1.f);
+	const int32 N = bHeavy ? 3 : 1;
+	for (int32 i = 0; i < N; ++i)
+	{
+		const float Yaw = (i - (N - 1) * 0.5f) * 8.f;
+		ASRProjectile::Fire(GetWorld(), this, From, FRotator(0, Yaw, 0).RotateVector(Aim), ESRSkill::PiercingArrow, Dmg, false);
+	}
 }
 
 void ASlimeCharacter::OnDealtDamage(ASREnemy* Target, float Amount, bool bCrit)
@@ -823,7 +1043,7 @@ void ASlimeCharacter::CastSelected()
 {
 	if (InMenu())
 	{
-		if (ASRGameMode* GM = GetGM()) GM->MenuClass = (GM->MenuClass + 1) % 4;
+		if (ASRGameMode* GM = GetGM()) GM->MenuClass = CycleClass(GM->MenuClass, 1);
 		return;
 	}
 	if (!CanAct() || !Skills.IsValidIndex(SelectedSkill)) return;
@@ -874,8 +1094,12 @@ void ASlimeCharacter::CastSkill(ESRSkill Skill)
 	case ESRSkill::WaterBlade:
 	case ESRSkill::Fireball:
 	case ESRSkill::StickyThread:
+	case ESRSkill::PiercingArrow:
 	{
-		const float Dmg = Skill == ESRSkill::WaterBlade ? Atk * 1.6f + 10.f : (Skill == ESRSkill::Fireball ? Atk * 2.2f + 20.f : Atk * 0.5f + 4.f);
+		float Dmg = Atk * 0.5f + 4.f;
+		if (Skill == ESRSkill::WaterBlade) Dmg = Atk * 1.6f + 10.f;
+		else if (Skill == ESRSkill::Fireball) Dmg = Atk * 2.2f + 20.f;
+		else if (Skill == ESRSkill::PiercingArrow) Dmg = Atk * 1.9f + 8.f;
 		ASRProjectile::Fire(W, this, Me + Flat * 70.f + FVector(0, 0, 20.f), Aim, Skill, Dmg, false);
 		break;
 	}
@@ -901,8 +1125,7 @@ void ASlimeCharacter::CastSkill(ESRSkill Skill)
 	case ESRSkill::Thunder:
 	{
 		ASREnemy* T = LockTarget.IsValid() ? LockTarget.Get() : FindTarget(2800.f, 0.4f);
-		FVector P = T ? T->GetActorLocation() : Me + Flat * 1200.f;
-		P.Z = SR::HeightAt(P.X, P.Y);
+		FVector P = T ? T->GetActorLocation() - FVector(0, 0, 80.f) : Me + Flat * 1200.f - FVector(0, 0, HalfH);
 		ASRFx::Spawn(W, ESRFxKind::Pillar, P, Info.Color, 140.f, 0.5f);
 		ASRFx::Spawn(W, ESRFxKind::Ring, P, Info.Color, 420.f, 0.4f);
 		AreaHit(P, 380.f, Atk * 3.f + 30.f, 200.f, true);
@@ -920,6 +1143,20 @@ void ASlimeCharacter::CastSkill(ESRSkill Skill)
 			++Chains;
 		}
 		Shake(9.f, 0.3f);
+		break;
+	}
+	case ESRSkill::ArrowRain:
+	{
+		ASREnemy* T = LockTarget.IsValid() ? LockTarget.Get() : FindTarget(2800.f, 0.4f);
+		const FVector P = T ? T->GetActorLocation() - FVector(0, 0, 80.f) : Me + Flat * 1200.f - FVector(0, 0, HalfH);
+		ASRFx::Spawn(W, ESRFxKind::Ring, P, Info.Color, 520.f, 0.6f);
+		for (int32 i = 0; i < 7; ++i)
+		{
+			const FVector Off(FMath::FRandRange(-400.f, 400.f), FMath::FRandRange(-400.f, 400.f), 0.f);
+			ASRFx::Spawn(W, ESRFxKind::Pillar, P + Off, Info.Color, 18.f, 0.25f + i * 0.04f);
+		}
+		AreaHit(P, 520.f, Atk * 2.4f + 20.f, 150.f, false);
+		Shake(5.f, 0.3f);
 		break;
 	}
 	case ESRSkill::Shockwave:
@@ -988,7 +1225,7 @@ void ASlimeCharacter::ReceiveDamage(float Amount, AActor* Source)
 		return;
 	}
 	float Dmg = Amount * (Form == ESRForm::Wolf ? 0.9f : 1.f) * (ClassId == ESRClass::Emperor ? 0.55f : 1.f);
-	Dmg = FMath::Max(1.f, Dmg - WeaponLevel * 0.5f);
+	Dmg = FMath::Max(1.f, Dmg * 100.f / (100.f + GetDefense() * 2.f));
 	HP -= Dmg;
 	SinceHurt = 0.f;
 	HurtFlash = 0.25f;
@@ -1042,6 +1279,14 @@ void ASlimeCharacter::Die()
 
 void ASlimeCharacter::RespawnAtGrace()
 {
+	if (bInDungeon)
+	{
+		if (ASRGameMode* GM = GetGM())
+		{
+			if (GM->Dungeon) GM->Dungeon->Exit(this, false);
+		}
+		bInDungeon = false;
+	}
 	const int32 Lost = Gold / 5;
 	Gold -= Lost;
 	bDead = false;
@@ -1170,12 +1415,19 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 			if (Form == ESRForm::Wolf) { Range = 240.f; Mul = 1.12f; }
 			if (Combo == 2) Mul *= 1.5f;
 			if (bHeavyAttack) { Range += 100.f; Mul *= 2.4f; }
-			LaunchCharacter(GetActorForwardVector() * (bHeavyAttack ? 650.f : 420.f), true, false);
-			MeleeHit(Range, bHeavyAttack ? -0.25f : 0.2f, GetAttack() * Mul, bHeavyAttack ? 750.f : 320.f, bHeavyAttack);
-			const FLinearColor SlashC = Form == ESRForm::Slime ? SlimeColor : FLinearColor(0.9f, 0.95f, 1.f);
-			ASRFx::Spawn(GetWorld(), bHeavyAttack ? ESRFxKind::Ring : ESRFxKind::Slash,
-				bHeavyAttack ? GetActorLocation() + GetActorForwardVector() * 150.f - FVector(0, 0, 40.f) : GetActorLocation() + GetActorForwardVector() * 120.f,
-				SlashC, Range * 0.75f, 0.2f, GetActorRotation());
+			if (ClassId == ESRClass::Archer && Form == ESRForm::Human)
+			{
+				FireArrows(bHeavyAttack);
+			}
+			else
+			{
+				LaunchCharacter(GetActorForwardVector() * (bHeavyAttack ? 650.f : 420.f), true, false);
+				MeleeHit(Range, bHeavyAttack ? -0.25f : 0.2f, GetAttack() * Mul, bHeavyAttack ? 750.f : 320.f, bHeavyAttack);
+				const FLinearColor SlashC = Form == ESRForm::Slime ? SlimeColor : FLinearColor(0.9f, 0.95f, 1.f);
+				ASRFx::Spawn(GetWorld(), bHeavyAttack ? ESRFxKind::Ring : ESRFxKind::Slash,
+					bHeavyAttack ? GetActorLocation() + GetActorForwardVector() * 150.f - FVector(0, 0, 40.f) : GetActorLocation() + GetActorForwardVector() * 120.f,
+					SlashC, Range * 0.75f, 0.2f, GetActorRotation());
+			}
 		}
 		if (AttackTime >= AttackDuration)
 		{
@@ -1238,6 +1490,13 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 void ASlimeCharacter::UpdateWorldChecks(float Dt)
 {
 	const FVector P = GetActorLocation();
+	BagFullWarn = FMath::Max(0.f, BagFullWarn - Dt);
+	if (bInDungeon)
+	{
+		// Inside the tower the terrain does not exist: only guard against falling out of the floor.
+		if (P.Z < ASRDungeon::Origin.Z - 1500.f) TeleportExact(ASRDungeon::Origin + FVector(-2900.f, -2900.f, 0.f));
+		return;
+	}
 	const float Ground = SR::HeightAt(P.X, P.Y);
 
 	// Fell through the world: put back on the surface
@@ -1246,22 +1505,48 @@ void ASlimeCharacter::UpdateWorldChecks(float Dt)
 		SetActorLocation(FVector(P.X, P.Y, Ground + 200.f), false, nullptr, ETeleportType::TeleportPhysics);
 		GetCharacterMovement()->StopMovementImmediately();
 	}
-	// Deep water: no swimming yet, bounce back to the last safe spot
-	WaterWarn = FMath::Max(0.f, WaterWarn - Dt);
-	if (Ground < -140.f && P.Z < 120.f)
+	// Swimming in lakes and the sea; the open ocean beyond the coast pushes you back
+	UCharacterMovementComponent* M = GetCharacterMovement();
+	const float HH = GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+	const float EdgeD = FMath::Sqrt(static_cast<float>(P.X * P.X + P.Y * P.Y)) / SR::WorldHalf;
+	if (EdgeD > 0.9f)
 	{
 		SetActorLocation(LastSafe, false, nullptr, ETeleportType::TeleportPhysics);
-		GetCharacterMovement()->StopMovementImmediately();
-		if (WaterWarn <= 0.f)
+		M->StopMovementImmediately();
+		Oracle(TEXT("Le correnti dell'oceano sono troppo forti: torna verso la terraferma."));
+		return;
+	}
+	const bool bDeep = Ground < -140.f;
+	if (!bSwimming && bDeep && P.Z < SR::WaterZ + HH * 0.6f)
+	{
+		bSwimming = true;
+		M->SetMovementMode(MOVE_Flying);
+		M->Velocity.Z = 0.f;
+		ASRFx::Spawn(GetWorld(), ESRFxKind::Ring, FVector(P.X, P.Y, SR::WaterZ + 5.f), FLinearColor(0.6f, 0.85f, 1.f), 220.f, 0.5f);
+	}
+	else if (bSwimming && (Ground > -110.f || P.Z > SR::WaterZ + HH + 80.f))
+	{
+		bSwimming = false;
+		M->SetMovementMode(MOVE_Falling);
+	}
+	if (bSwimming)
+	{
+		const float WantZ = SR::WaterZ - HH * 0.35f + FMath::Sin(Clock * 2.f) * 4.f;
+		SetActorLocation(FVector(P.X, P.Y, FMath::FInterpTo(static_cast<float>(P.Z), WantZ, Dt, 6.f)));
+		M->Velocity.Z = 0.f;
+		M->MaxFlySpeed = BaseWalk * (bSprinting && Stamina > 1.f ? 0.85f : 0.55f);
+		Stamina = FMath::Max(0.f, Stamina - Dt * (bSprinting ? 12.f : 3.f));
+		StaminaDelay = 0.5f;
+		if (Stamina <= 0.f)
 		{
-			Oracle(TEXT("Acque profonde: non sai ancora nuotare. (Arriva nella prossima versione!)"));
-			WaterWarn = 6.f;
+			HP -= MaxHP * 0.05f * Dt;
+			if (HP <= 0.f) { HP = 0.f; Die(); }
 		}
 	}
 	else
 	{
 		SafeTimer += Dt;
-		if (SafeTimer > 0.5f && !GetCharacterMovement()->IsFalling() && Ground > 30.f)
+		if (SafeTimer > 0.5f && !M->IsFalling() && Ground > 30.f)
 		{
 			SafeTimer = 0.f;
 			LastSafe = P + FVector(0, 0, 20.f);
@@ -1330,6 +1615,12 @@ void ASlimeCharacter::UpdateAnimation(float Dt)
 			SX -= St * 0.5f;
 		}
 		SZ -= LandSquash * 0.35f;
+		if (bSwimming)
+		{
+			Off.Z = FMath::Sin(Clock * 3.f) * 5.f;
+			SZ *= 0.88f;
+			SX *= 1.06f;
+		}
 		SX += LandSquash * 0.25f;
 		if (AttackP >= 0.f)
 		{
@@ -1361,7 +1652,14 @@ void ASlimeCharacter::UpdateAnimation(float Dt)
 	{
 		HumanRig.Flash(Flash, FLinearColor(1.f, 0.1f, 0.05f));
 		HumanRig.Walk(WalkPhase * 0.8f, bFalling ? 0.f : Amount, Clock);
-		if (bFalling)
+		if (bSwimming)
+		{
+			const float Stroke = Clock * (3.f + Amount * 4.f);
+			if (HumanRig.ArmL) HumanRig.ArmL->SetRelativeRotation(FRotator(FMath::Fmod(Stroke * 57.3f, 360.f), 0, -20.f));
+			if (HumanRig.ArmR) HumanRig.ArmR->SetRelativeRotation(FRotator(FMath::Fmod(Stroke * 57.3f + 180.f, 360.f), 0, 20.f));
+			if (HumanRig.Torso) HumanRig.Torso->SetRelativeRotation(FRotator(-35.f * Amount, 0, 0));
+		}
+		else if (bFalling)
 		{
 			if (HumanRig.LegL) HumanRig.LegL->SetRelativeRotation(FRotator(35.f, 0, 0));
 			if (HumanRig.LegR) HumanRig.LegR->SetRelativeRotation(FRotator(-10.f, 0, 0));

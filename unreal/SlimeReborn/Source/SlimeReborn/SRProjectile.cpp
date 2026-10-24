@@ -55,13 +55,17 @@ void ASRProjectile::Init(AActor* Shooter, const FVector& Dir, ESRSkill InSkill, 
 	case ESRSkill::StickyThread:
 		Speed = bFromEnemy ? 2000.f : 3600.f; Radius = 80.f; Life = 1.3f; Scale = FVector(0.5f, 0.12f, 0.12f);
 		break;
+	case ESRSkill::PiercingArrow:
+		Speed = 5200.f; Radius = 70.f; bPierce = true; Life = 1.0f; Scale = FVector(0.05f, 0.05f, 0.9f);
+		break;
 	default:
 		break;
 	}
 	Velocity = Dir * Speed;
-	Core->SetStaticMesh(SR::Mesh(Skill == ESRSkill::StickyThread ? TEXT("Cylinder") : TEXT("Sphere")));
+	const bool bRod = Skill == ESRSkill::StickyThread || Skill == ESRSkill::PiercingArrow;
+	Core->SetStaticMesh(SR::Mesh(bRod ? TEXT("Cylinder") : TEXT("Sphere")));
 	Core->SetRelativeScale3D(Scale);
-	if (Skill == ESRSkill::StickyThread) Core->SetRelativeRotation(FRotator(-90.f, 0, 0));
+	if (bRod) Core->SetRelativeRotation(FRotator(-90.f, 0, 0));
 	Core->SetMaterial(0, SR::MakeMID(this, Color, ESRMat::Fx, 12.f));
 	Light->SetLightColor(Color);
 }
@@ -130,7 +134,7 @@ void ASRProjectile::Tick(float DeltaSeconds)
 		return;
 	}
 	SetActorLocation(To);
-	if (Skill == ESRSkill::WaterBlade) Core->AddLocalRotation(FRotator(0, 0, 900.f * DeltaSeconds));
+	if (Skill == ESRSkill::WaterBlade && !bDone) Core->AddLocalRotation(FRotator(0, 0, 900.f * DeltaSeconds));
 
 	if (bFromEnemy)
 	{

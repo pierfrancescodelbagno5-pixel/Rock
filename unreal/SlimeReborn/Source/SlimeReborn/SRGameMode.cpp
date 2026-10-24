@@ -5,6 +5,10 @@
 #include "SRWorld.h"
 #include "SRHUD.h"
 #include "SRSaveGame.h"
+#include "SRDungeon.h"
+#include "SRCompanion.h"
+#include "SRLoot.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -38,6 +42,11 @@ void ASRGameMode::InitGame(const FString& MapName, const FString& Options, FStri
 		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SRWorld = W->SpawnActor<ASRWorld>(ASRWorld::StaticClass(), FTransform::Identity, P);
 	}
+	{
+		FActorSpawnParameters P;
+		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Dungeon = W->SpawnActor<ASRDungeon>(ASRDungeon::StaticClass(), FTransform::Identity, P);
+	}
 	bHasSave = UGameplayStatics::DoesSaveGameExist(SaveSlot, 0);
 	ZoneStates.SetNum(SR::Zones().Num());
 }
@@ -62,11 +71,44 @@ ASlimeCharacter* ASRGameMode::GetPlayer() const
 void ASRGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (Companions.Num() == 0) SpawnCompanions();
 	SpawnTimer += DeltaSeconds;
 	if (SpawnTimer >= 0.5f)
 	{
 		UpdateSpawns();
 		SpawnTimer = 0.f;
+	}
+}
+
+void ASRGameMode::SpawnCompanions()
+{
+	UWorld* W = GetWorld();
+	if (!W) return;
+	for (int32 i = 0; i < ASRCompanion::Num; ++i)
+	{
+		const FVector2D H = ASRCompanion::HomeOf(i);
+		const FTransform T(FRotator(0, 180.f, 0), FVector(H.X, H.Y, SR::CityZ + 110.f));
+		ASRCompanion* C = W->SpawnActorDeferred<ASRCompanion>(ASRCompanion::StaticClass(), T, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!C) continue;
+		C->Setup(i);
+		C->FinishSpawning(T);
+		Companions.Add(C);
+	}
+}
+
+void ASRGameMode::RefreshSpouses()
+{
+	ASlimeCharacter* P = GetPlayer();
+	if (!P) return;
+	int32 N = 0;
+	for (ASRCompanion* C : Companions)
+	{
+		if (C && C->bMarried) ++N;
+	}
+	if (N != P->SpouseCount)
+	{
+		P->SpouseCount = N;
+		P->Recalc();
 	}
 }
 
@@ -92,6 +134,14 @@ void ASRGameMode::StartGame(bool bContinue)
 		QuestProgress = 0;
 		bQuestActive = false;
 		Kills = 0;
+		if (Dungeon) Dungeon->BestFloor = 0;
+		for (ASRCompanion* Cmp : Companions)
+		{
+			if (!Cmp) continue;
+			Cmp->ApplyState(0.f, false, false);
+			Cmp->ReturnHome();
+		}
+		P->SpouseCount = 0;
 		P->ApplyClass(static_cast<ESRClass>(MenuClass), true);
 		P->GraceFound.Init(false, SR::Graces().Num());
 		if (P->GraceFound.Num() > 0) P->GraceFound[0] = true;
@@ -157,6 +207,15 @@ void ASRGameMode::OnEnemyKilled(ASREnemy* Enemy)
 	if (ASRHUD* H = Cast<ASRHUD>(Cast<APlayerController>(P->GetController()) ? Cast<APlayerController>(P->GetController())->GetHUD() : nullptr))
 	{
 		H->DamageNumber(Enemy->GetHeadLocation() + FVector(0, 0, 40.f), static_cast<float>(G), FLinearColor(1.f, 0.82f, 0.25f), TEXT("oro +"));
+	}
+	if (FMath::FRand() < (Enemy->bBoss ? 1.f : 0.32f))
+	{
+		const FVector Feet = Enemy->GetActorLocation() - FVector(0, 0, Enemy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() - 20.f);
+		ASRLoot::Drop(GetWorld(), Feet, SR::RollItem(Enemy->Level, Enemy->bBoss ? 0.75f : 0.f));
+	}
+	for (ASRCompanion* Cmp : Companions)
+	{
+		if (Cmp && Cmp->bRecruited) Cmp->AddAffection(0.5f);
 	}
 	if (FMath::FRand() < (Enemy->bBoss ? 1.f : 0.07f))
 	{
@@ -288,6 +347,15 @@ void ASRGameMode::SaveProgress()
 	S->bQuestActive = bQuestActive;
 	S->TimeOfDay = SRWorld ? SRWorld->TimeOfDay : 9.f;
 	S->Kills = Kills;
+	S->Bag = P->Bag;
+	for (const FSRItem& E : P->Equipped) S->Equipped.Add(E);
+	for (ASRCompanion* Cmp : Companions)
+	{
+		S->CompanionAffection.Add(Cmp ? Cmp->Affection : 0.f);
+		S->CompanionRecruited.Add(Cmp && Cmp->bRecruited);
+		S->CompanionMarried.Add(Cmp && Cmp->bMarried);
+	}
+	S->TowerBestFloor = Dungeon ? Dungeon->BestFloor : 0;
 	bHasSave = UGameplayStatics::SaveGameToSlot(S, SaveSlot, 0) || bHasSave;
 }
 
@@ -296,7 +364,7 @@ bool ASRGameMode::LoadProgress(ASlimeCharacter* P)
 	if (!P || !UGameplayStatics::DoesSaveGameExist(SaveSlot, 0)) return false;
 	USRSaveGame* S = Cast<USRSaveGame>(UGameplayStatics::LoadGameFromSlot(SaveSlot, 0));
 	if (!S) return false;
-	P->ApplyClass(static_cast<ESRClass>(FMath::Clamp<int32>(S->ClassId, 0, 3)), true);
+	P->ApplyClass(static_cast<ESRClass>(FMath::Clamp<int32>(S->ClassId, 0, SR::NumClasses - 1)), true);
 	P->Level = FMath::Max(1, S->Level);
 	P->XP = S->XP;
 	P->Gold = S->Gold;
@@ -308,6 +376,23 @@ bool ASRGameMode::LoadProgress(ASlimeCharacter* P)
 	P->bHasWolf = S->bHasWolf;
 	if (S->Graces.Num() == SR::Graces().Num()) P->GraceFound = S->Graces;
 	P->LastGrace = S->LastGrace;
+	P->Bag = S->Bag;
+	for (int32 i = 0; i < 3 && i < S->Equipped.Num(); ++i) P->Equipped[i] = S->Equipped[i];
+	for (int32 i = 0; i < Companions.Num(); ++i)
+	{
+		ASRCompanion* Cmp = Companions[i];
+		if (!Cmp) continue;
+		Cmp->ApplyState(S->CompanionAffection.IsValidIndex(i) ? S->CompanionAffection[i] : 0.f,
+			S->CompanionRecruited.IsValidIndex(i) && S->CompanionRecruited[i],
+			S->CompanionMarried.IsValidIndex(i) && S->CompanionMarried[i]);
+		if (!Cmp->bRecruited) Cmp->ReturnHome();
+	}
+	if (Dungeon) Dungeon->BestFloor = S->TowerBestFloor;
+	P->SpouseCount = 0;
+	for (ASRCompanion* Cmp : Companions)
+	{
+		if (Cmp && Cmp->bMarried) ++P->SpouseCount;
+	}
 	P->Recalc();
 	P->HP = P->MaxHP;
 	P->MP = P->MaxMP;

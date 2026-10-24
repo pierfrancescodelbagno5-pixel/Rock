@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
+#include "SRTypes.h"
 #include "SRSaveGame.generated.h"
 
 UCLASS()
@@ -28,4 +29,10 @@ public:
 	UPROPERTY() bool bQuestActive = false;
 	UPROPERTY() float TimeOfDay = 9.f;
 	UPROPERTY() int32 Kills = 0;
+	UPROPERTY() TArray<FSRItem> Bag;
+	UPROPERTY() TArray<FSRItem> Equipped;
+	UPROPERTY() TArray<float> CompanionAffection;
+	UPROPERTY() TArray<bool> CompanionRecruited;
+	UPROPERTY() TArray<bool> CompanionMarried;
+	UPROPERTY() int32 TowerBestFloor = 0;
 };

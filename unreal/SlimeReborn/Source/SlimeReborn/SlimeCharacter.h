@@ -13,6 +13,7 @@ class ASREnemy;
 class ASRNPC;
 class ASRHUD;
 class ASRGameMode;
+class ASRCompanion;
 
 /**
  * The reincarnated hero. As a slime it can devour monsters with Predatore to steal their skills,
@@ -49,6 +50,14 @@ public:
 	void Shake(float Amplitude, float Duration);
 	void OnDealtDamage(ASREnemy* Target, float Amount, bool bCrit = false);
 	void AbsorbEnemy(ASREnemy* Enemy);
+	float GetDefense() const;
+	float GetCrit() const;
+
+	// ---- Loot -----------------------------------------------------------------------
+	bool PickUp(const FSRItem& Item);
+	void EquipFromBag(int32 Index);
+	int32 SellBag();
+	static constexpr int32 BagSize = 27;
 
 	// ---- UI hooks -------------------------------------------------------------------
 	void Oracle(const FString& Text);
@@ -60,6 +69,8 @@ public:
 	void TravelToGrace(int32 Index);
 	void RespawnAtGrace();
 	void TeleportTo(const FVector& Location);
+	/** Teleport to an exact floor point (used inside the tower, where the terrain height does not apply). */
+	void TeleportExact(const FVector& FloorPoint);
 
 	// ---- State (read by HUD and save system) ------------------------------------------
 	ESRClass ClassId = ESRClass::Emperor;
@@ -89,6 +100,13 @@ public:
 	TWeakObjectPtr<ASREnemy> LockTarget;
 	float Cooldowns[static_cast<int32>(ESRSkill::MAX)];
 	float PotionCooldown = 0.f;
+	TArray<FSRItem> Bag;
+	FSRItem Equipped[3];
+	bool bShowInventory = false;
+	int32 InvPage = 0;
+	bool bInDungeon = false;
+	bool bSwimming = false;
+	int32 SpouseCount = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera") TObjectPtr<USpringArmComponent> CameraBoom;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera") TObjectPtr<UCameraComponent> FollowCamera;
@@ -117,6 +135,9 @@ private:
 	void UsePotion();
 	void ToggleHelp();
 	void ToggleLock();
+	void ToggleInventory();
+	void FireArrows(bool bHeavy);
+	ASRCompanion* FindCompanion(float MaxDist) const;
 	void MenuStart();
 	void MenuContinue();
 	void Num1() { OnNumber(1); }
@@ -198,7 +219,7 @@ private:
 	float ZoomMul = 1.f;
 	float SafeTimer = 0.f;
 	float RegionTimer = 0.f;
-	float WaterWarn = 0.f;
+	float BagFullWarn = 0.f;
 	FVector LastSafe = FVector::ZeroVector;
 	FString LastRegion;
 };

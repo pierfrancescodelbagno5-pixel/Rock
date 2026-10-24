@@ -89,6 +89,7 @@ Metti la cartella in un percorso **corto e senza spazi strani**, per esempio `C:
 | H | D-pad sinistra | Pozione curativa |
 | Clic rotella | R3 | Aggancia il bersaglio |
 | Rotella | — | Zoom della camera |
+| I / Tab | — | Inventario (1–9 equipaggia, T cambia pagina) |
 | F1 | Select | Aiuto con tutti i comandi |
 | Invio / C | Start | Nuova partita / Continua (nel menu) |
 
@@ -157,6 +158,21 @@ Metti la cartella in un percorso **corto e senza spazi strani**, per esempio `C:
   - dialoghi
   - schermata di morte "SEI CADUTO"
 - **Salvataggio automatico** (alla Grazia, quando sali di livello e quando completi una missione) e opzione **Continua**.
+
+### Novità della Fase 2
+
+- **Bottino:** i nemici lasciano armi, armature e anelli con 5 rarità (Comune → Leggendario) e statistiche casuali: attacco, difesa, vita, mana e critico.
+  - Si raccolgono passandoci sopra; il primo oggetto di ogni tipo si equipaggia da solo.
+  - Con **I** apri l'inventario; Elia, al mercato, compra tutto il bottino che hai nella borsa.
+- **Nuoto** in laghi e mare, con consumo di stamina. Il mare aperto oltre la costa ti respinge.
+- **Nuova classe: Arciere.** Attacca da lontano, con Freccia Perforante e Pioggia di Frecce.
+- **Compagne:** Kaede (spadaccina oni, alla Gilda), Liora (maga elfica, alla cattedrale) e Rhea (cacciatrice kemonomimi, alla taverna).
+  - Parla con loro per far crescere l'affetto: a 15 si uniscono al gruppo e combattono al tuo fianco.
+  - A 90, con 300 oro per l'anello, puoi chiedere di sposarle (ognuna dà +8% vita e attacco). È una storia romantica, senza contenuti espliciti.
+- **Torre dei Mille Piani:** la torre viola fuori dalla porta est.
+  - Ogni piano è un labirinto di 9 stanze: sconfiggi tutti i nemici per aprire il portale dorato verso il piano successivo.
+  - Ogni 5 piani c'è un **Campione** e un checkpoint; il portale blu ti riporta fuori.
+  - Ci sono 5 ambientazioni: pietra, ghiaccio, lava, cristallo e giungla.
 
 ## 6. Creare il gioco `.exe` per Windows
 

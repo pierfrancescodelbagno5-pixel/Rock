@@ -63,7 +63,7 @@ struct FSRHumanStyle
 	bool bCrown = false;
 	bool bGlowEyes = false;
 	bool bBald = false;
-	/** 0 none, 1 sword, 2 spear, 3 staff, 4 club, 5 axe, 6 greatsword */
+	/** 0 none, 1 sword, 2 spear, 3 staff, 4 club, 5 axe, 6 greatsword, 7 bow */
 	int32 Weapon = 0;
 };
 

@@ -311,7 +311,7 @@ void ASRWorld::BuildWater()
 {
 	const float Size = SR::WorldHalf * 3.2f / 100.f;
 	UStaticMeshComponent* Sea = SR::AddPart(this, Root, TEXT("Plane"), FVector(0, 0, SR::WaterZ), FVector(Size, Size, 1.f),
-		SR::Hex(0x1d4f66), ESRMat::Water);
+		SR::Hex(0x1d4f66), FRotator::ZeroRotator, ESRMat::Water);
 	if (UMaterialInstanceDynamic* M = Cast<UMaterialInstanceDynamic>(Sea->GetMaterial(0)))
 	{
 		M->SetScalarParameterValue(TEXT("Roughness"), 0.05f);
@@ -349,7 +349,11 @@ void ASRWorld::BuildNature()
 	HISM* Bush = MakeHISM(TEXT("Sphere"), SR::Hex(0x3a6327), false, 14000.f);
 
 	const float Lim = SR::WorldHalf * 0.82f;
-	auto CityClear = [](float X, float Y, float Extra) { return X * X + Y * Y < FMath::Square(SR::CityR + Extra); };
+	auto CityClear = [](float X, float Y, float Extra)
+	{
+		return X * X + Y * Y < FMath::Square(SR::CityR + Extra)
+			|| FMath::Square(X - SR::TowerPos.X) + FMath::Square(Y - SR::TowerPos.Y) < FMath::Square(2600.f + Extra);
+	};
 
 	// ---- Trees ----
 	const int32 NumTrees = FMath::RoundToInt(20000 * FoliageDensity);
@@ -848,6 +852,28 @@ void ASRWorld::BuildLandmarks()
 		}
 		SR::AddPart(this, Root, TEXT("Sphere"), C + FVector(0, 0, 60.f), FVector(1.6f, 1.6f, 1.2f), FLinearColor(1.f, 0.4f, 0.05f), FRotator::ZeroRotator, ESRMat::Fx, 10.f);
 		Light(C + FVector(0, 0, 200.f), FLinearColor(1.f, 0.45f, 0.15f), 12000.f, 2600.f);
+	}
+
+	// The Tower of a Thousand Floors, just outside the east gate
+	{
+		const FVector T = SR::Ground(SR::TowerPos.X, SR::TowerPos.Y);
+		Pillar->AddInstance(FTransform(FRotator::ZeroRotator, T + FVector(0, 0, 40.f), FVector(18.f, 18.f, 1.2f)));
+		UHierarchicalInstancedStaticMeshComponent* TowerBody = MakeHISM(TEXT("Cylinder"), SR::Hex(0x4a4458), true);
+		UHierarchicalInstancedStaticMeshComponent* TowerTop = MakeHISM(TEXT("Cone"), SR::Hex(0x3a1e5a), true);
+		TowerBody->AddInstance(FTransform(FRotator::ZeroRotator, T + FVector(0, 0, 2600.f), FVector(13.f, 13.f, 52.f)));
+		TowerBody->AddInstance(FTransform(FRotator::ZeroRotator, T + FVector(0, 0, 5400.f), FVector(15.f, 15.f, 3.f)));
+		TowerTop->AddInstance(FTransform(FRotator::ZeroRotator, T + FVector(0, 0, 5400.f + 150.f + 900.f), FVector(16.f, 16.f, 18.f)));
+		for (int32 w = 0; w < 24; ++w)
+		{
+			const float A = w * 15.f * PI / 180.f * 3.f;
+			const FVector P = T + FVector(FMath::Cos(A) * 655.f, FMath::Sin(A) * 655.f, 700.f + w * 190.f);
+			SR::AddPart(this, Root, TEXT("Cube"), P, FVector(0.2f, 0.9f, 1.4f), FLinearColor(0.75f, 0.45f, 1.f), FRotator(0, FMath::RadiansToDegrees(A), 0), ESRMat::Fx, 4.f);
+		}
+		const FVector Door = SR::TowerDoor();
+		SR::AddPart(this, Root, TEXT("Cube"), Door + FVector(0, 100.f, 300.f), FVector(4.f, 0.4f, 6.f), SR::Hex(0x1a1024));
+		SR::AddPart(this, Root, TEXT("Cylinder"), Door + FVector(0, -60.f, 6.f), FVector(3.2f, 3.2f, 0.06f), FLinearColor(0.7f, 0.35f, 1.f), FRotator::ZeroRotator, ESRMat::Fx, 6.f);
+		Light(Door + FVector(0, -120.f, 260.f), FLinearColor(0.7f, 0.4f, 1.f), 12000.f, 1800.f);
+		Light(T + FVector(0, 0, 6600.f), FLinearColor(0.7f, 0.4f, 1.f), 60000.f, 6000.f);
 	}
 
 	// Northern ruins: broken colonnades and walls

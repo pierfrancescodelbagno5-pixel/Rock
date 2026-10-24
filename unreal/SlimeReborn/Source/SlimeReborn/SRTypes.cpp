@@ -152,6 +152,8 @@ const FSRSkillInfo& SR::Skill(ESRSkill S)
 		{ TEXT("Filo Vincolante"), TEXT("Filo appiccicoso che immobilizza il nemico."), 6.f, 1.0f, FLinearColor(0.9f, 0.9f, 0.85f) },
 		{ TEXT("Rigenerazione"), TEXT("Rigenera rapidamente il 45% della vita."), 25.f, 9.f, FLinearColor(0.3f, 1.f, 0.45f) },
 		{ TEXT("Divoratore"), TEXT("Lo stomaco infinito risucchia e divora tutto attorno a te."), 45.f, 12.f, FLinearColor(0.35f, 0.f, 0.55f) },
+		{ TEXT("Freccia Perforante"), TEXT("Una freccia che trapassa ogni nemico sulla sua linea."), 6.f, 0.6f, FLinearColor(0.85f, 0.95f, 0.55f) },
+		{ TEXT("Pioggia di Frecce"), TEXT("Centinaia di frecce cadono sull'area bersaglio."), 20.f, 4.f, FLinearColor(0.55f, 1.f, 0.45f) },
 	};
 	const int32 I = FMath::Clamp(static_cast<int32>(S), 0, static_cast<int32>(ESRSkill::MAX) - 1);
 	return Table[I];
@@ -164,8 +166,9 @@ const FSRClassInfo& SR::Class(ESRClass C)
 		{ TEXT("Spadaccino"), TEXT("Lama del Regno"), TEXT("Tanta vita, colpi pesanti, Lama Oscura dal primo livello."), 210.f, 60.f, 18.f, false },
 		{ TEXT("Arcimago"), TEXT("Erede delle Torri"), TEXT("Mana enorme, Palla di Fuoco e Fulmine Nero."), 105.f, 220.f, 8.f, false },
 		{ TEXT("L'Imperatore Infinito"), TEXT("Pierfrancesco Del Bagno"), TEXT("Classe mitica: tutte le forme, tutte le abilita', Predatore e Divoratore. XP doppia."), 420.f, 420.f, 34.f, true },
+		{ TEXT("Arciere"), TEXT("Occhio di Falco"), TEXT("Attacca da lontano con l'arco: frecce perforanti e Pioggia di Frecce."), 140.f, 120.f, 15.f, false },
 	};
-	return Table[FMath::Clamp(static_cast<int32>(C), 0, 3)];
+	return Table[FMath::Clamp(static_cast<int32>(C), 0, NumClasses - 1)];
 }
 
 const FSREnemyInfo& SR::Enemy(ESREnemyKind K)
@@ -232,6 +235,100 @@ const TArray<FSRQuest>& SR::Quests()
 		List.Add({ TEXT("Il Re degli Orchi"), TEXT("Il signore della fame siede sul trono a nord-est. Distruggilo."), ESREnemyKind::OrcKing, 1, 4000, 1200, 6 });
 	}
 	return List;
+}
+
+ESRClass SR::ClassAt(int32 DisplayIndex)
+{
+	static const ESRClass Order[NumClasses] = { ESRClass::Slime, ESRClass::Swordsman, ESRClass::Mage, ESRClass::Archer, ESRClass::Emperor };
+	return Order[((DisplayIndex % NumClasses) + NumClasses) % NumClasses];
+}
+
+int32 SR::ClassDisplayIndex(ESRClass C)
+{
+	for (int32 i = 0; i < NumClasses; ++i)
+	{
+		if (ClassAt(i) == C) return i;
+	}
+	return 0;
+}
+
+FVector SR::TowerDoor()
+{
+	return Ground(TowerPos.X, TowerPos.Y - 760.f);
+}
+
+// ============================================================================
+// Loot
+// ============================================================================
+
+const TCHAR* SR::RarityName(uint8 Rarity)
+{
+	static const TCHAR* Names[] = { TEXT("Comune"), TEXT("Non comune"), TEXT("Raro"), TEXT("Epico"), TEXT("Leggendario") };
+	return Names[FMath::Min<int32>(Rarity, 4)];
+}
+
+FLinearColor SR::RarityColor(uint8 Rarity)
+{
+	static const FLinearColor Colors[] = {
+		FLinearColor(0.82f, 0.82f, 0.82f), FLinearColor(0.35f, 1.f, 0.35f), FLinearColor(0.3f, 0.6f, 1.f),
+		FLinearColor(0.75f, 0.35f, 1.f), FLinearColor(1.f, 0.62f, 0.1f) };
+	return Colors[FMath::Min<int32>(Rarity, 4)];
+}
+
+FSRItem SR::RollItem(int32 Level, float Luck)
+{
+	FSRItem It;
+	Level = FMath::Max(1, Level);
+	const float Roll = FMath::FRand() + Luck;
+	It.Rarity = Roll < 0.6f ? 0 : (Roll < 0.85f ? 1 : (Roll < 0.95f ? 2 : (Roll < 1.02f ? 3 : 4)));
+	It.ItemLevel = Level;
+	static const float RM[] = { 1.f, 1.3f, 1.7f, 2.3f, 3.2f };
+	const float M = RM[It.Rarity];
+	const int32 SlotRoll = FMath::RandRange(0, 9);
+	It.Slot = SlotRoll < 5 ? ESRItemSlot::Weapon : (SlotRoll < 8 ? ESRItemSlot::Armor : ESRItemSlot::Ring);
+
+	static const TCHAR* Weapons[] = { TEXT("Spada"), TEXT("Katana"), TEXT("Lancia"), TEXT("Ascia"), TEXT("Bastone"), TEXT("Arco"), TEXT("Pugnale"), TEXT("Martello"), TEXT("Falce") };
+	static const TCHAR* Armors[] = { TEXT("Corazza"), TEXT("Veste"), TEXT("Mantello"), TEXT("Armatura"), TEXT("Giaco"), TEXT("Tunica") };
+	static const TCHAR* Rings[] = { TEXT("Anello"), TEXT("Amuleto"), TEXT("Talismano"), TEXT("Sigillo") };
+	static const TCHAR* Of[] = {
+		TEXT("del Goblin"), TEXT("di Altheria"), TEXT("della Tempesta"), TEXT("del Lupo"), TEXT("dell'Eroe Evocato"),
+		TEXT("del Drago Sigillato"), TEXT("del Re Demone"), TEXT("del Saggio"), TEXT("della Gilda"), TEXT("dell'Orco"),
+		TEXT("della Luna"), TEXT("dei Mille Piani"), TEXT("del Reincarnato"), TEXT("del Cavaliere Nero") };
+	const TCHAR* Base = nullptr;
+	switch (It.Slot)
+	{
+	case ESRItemSlot::Weapon:
+		Base = Weapons[FMath::RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(Weapons)) - 1)];
+		It.Atk = FMath::RoundToFloat((3.f + Level * 1.6f) * M * FMath::FRandRange(0.9f, 1.1f));
+		if (It.Rarity >= 3) It.Crit = FMath::FRandRange(0.04f, 0.12f);
+		break;
+	case ESRItemSlot::Armor:
+		Base = Armors[FMath::RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(Armors)) - 1)];
+		It.Def = FMath::RoundToFloat((2.f + Level * 0.9f) * M * FMath::FRandRange(0.9f, 1.1f));
+		It.HP = FMath::RoundToFloat(Level * 5.f * M);
+		break;
+	default:
+		Base = Rings[FMath::RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(Rings)) - 1)];
+		It.HP = FMath::RoundToFloat(Level * 3.f * M);
+		It.MP = FMath::RoundToFloat(Level * 4.f * M);
+		It.Atk = FMath::RoundToFloat(Level * 0.4f * M);
+		if (It.Rarity >= 2) It.Crit = FMath::FRandRange(0.02f, 0.08f);
+		break;
+	}
+	It.Name = FString::Printf(TEXT("%s %s"), Base, Of[FMath::RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(Of)) - 1)]);
+	It.Value = FMath::RoundToInt((10.f + Level * 4.f) * M * M);
+	return It;
+}
+
+FString SR::ItemStats(const FSRItem& Item)
+{
+	FString S;
+	if (Item.Atk > 0.f) S += FString::Printf(TEXT("Att +%d  "), FMath::RoundToInt(Item.Atk));
+	if (Item.Def > 0.f) S += FString::Printf(TEXT("Dif +%d  "), FMath::RoundToInt(Item.Def));
+	if (Item.HP > 0.f) S += FString::Printf(TEXT("Vita +%d  "), FMath::RoundToInt(Item.HP));
+	if (Item.MP > 0.f) S += FString::Printf(TEXT("Mana +%d  "), FMath::RoundToInt(Item.MP));
+	if (Item.Crit > 0.f) S += FString::Printf(TEXT("Critico +%d%%  "), FMath::RoundToInt(Item.Crit * 100.f));
+	return S;
 }
 
 float SR::XPForLevel(int32 Level)

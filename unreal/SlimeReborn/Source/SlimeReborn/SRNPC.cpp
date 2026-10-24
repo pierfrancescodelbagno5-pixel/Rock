@@ -157,7 +157,7 @@ FString ASRNPC::PromptVerb() const
 	switch (NPCRole)
 	{
 	case ESRNPCRole::GuildMaster: return TEXT("Missioni");
-	case ESRNPCRole::Merchant: return TEXT("Compra pozione (25 oro)");
+	case ESRNPCRole::Merchant: return TEXT("Vendi bottino / Compra pozione (25 oro)");
 	case ESRNPCRole::Blacksmith: return TEXT("Potenzia arma");
 	case ESRNPCRole::Priestess: return TEXT("Benedizione");
 	default: return TEXT("Parla");
@@ -176,6 +176,12 @@ FString ASRNPC::Interact(ASlimeCharacter* Player)
 		return GM ? GM->GuildTalk(Player) : FString();
 
 	case ESRNPCRole::Merchant:
+		if (Player->Bag.Num() > 0)
+		{
+			const int32 Count = Player->Bag.Num();
+			const int32 Earned = Player->SellBag();
+			return FString::Printf(TEXT("Compro tutto il tuo bottino: %d oggetti per %d monete d'oro! Parlami ancora per le pozioni."), Count, Earned);
+		}
 		if (Player->Gold >= 25)
 		{
 			Player->Gold -= 25;

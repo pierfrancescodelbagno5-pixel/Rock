@@ -17,7 +17,7 @@ public:
 	ASREnemy();
 
 	/** Call before FinishSpawning. */
-	void Setup(ESREnemyKind InKind, int32 InLevel, int32 InZone);
+	void Setup(ESREnemyKind InKind, int32 InLevel, int32 InZone, float InElite = 1.f);
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -42,6 +42,8 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy") float XPValue = 10.f;
 	float LastHitTime = -100.f;
 	bool bBoss = false;
+	/** > 1 for dungeon champions: more HP, damage and XP, shown with the boss bar. */
+	float EliteMult = 1.f;
 
 private:
 	enum class EState : uint8 { Idle, Chase, Windup, Recover, Stagger, Return };

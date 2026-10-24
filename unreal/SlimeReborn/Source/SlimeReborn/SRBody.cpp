@@ -208,6 +208,12 @@ void SR::AddWeapon(AActor* O, FSRRig& Rig, int32 Weapon, const FLinearColor& Acc
 		Part(O, Rig, Hn, TEXT("Cube"), FVector(75.f, 0, 0), FVector(1.3f, 0.04f, 0.14f), SR::Hex(0x50545e), FRotator::ZeroRotator, false);
 		Part(O, Rig, Hn, TEXT("Cube"), FVector(8.f, 0, 0), FVector(0.06f, 0.4f, 0.07f), Accent, FRotator::ZeroRotator, false);
 		break;
+	case 7: // bow
+		Part(O, Rig, Hn, TEXT("Cube"), FVector(6.f, 0, 28.f), FVector(0.04f, 0.04f, 0.6f), Wood, FRotator(-18.f, 0, 0), false);
+		Part(O, Rig, Hn, TEXT("Cube"), FVector(6.f, 0, -28.f), FVector(0.04f, 0.04f, 0.6f), Wood, FRotator(18.f, 0, 0), false);
+		Part(O, Rig, Hn, TEXT("Cube"), FVector(-6.f, 0, 0), FVector(0.01f, 0.01f, 1.12f), SR::Hex(0xe8e2d0), FRotator::ZeroRotator, false);
+		Part(O, Rig, Hn, TEXT("Cube"), FVector(2.f, 0, 0), FVector(0.06f, 0.06f, 0.12f), Accent, FRotator::ZeroRotator, false);
+		break;
 	default:
 		break;
 	}

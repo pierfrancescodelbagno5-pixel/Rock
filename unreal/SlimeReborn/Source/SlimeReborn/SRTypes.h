@@ -24,7 +24,8 @@ enum class ESRClass : uint8
 	Slime,
 	Swordsman,
 	Mage,
-	Emperor
+	Emperor,
+	Archer
 };
 
 UENUM(BlueprintType)
@@ -40,6 +41,8 @@ enum class ESRSkill : uint8
 	StickyThread,
 	Regen,
 	Devour,
+	PiercingArrow,
+	ArrowRain,
 	MAX UMETA(Hidden)
 };
 
@@ -53,6 +56,36 @@ enum class ESREnemyKind : uint8
 	Lizardman,
 	Knight,
 	OrcKing
+};
+
+UENUM(BlueprintType)
+enum class ESRItemSlot : uint8
+{
+	Weapon,
+	Armor,
+	Ring
+};
+
+/** A piece of loot: weapon, armour or ring with random stats. */
+USTRUCT(BlueprintType)
+struct SLIMEREBORN_API FSRItem
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Name;
+	UPROPERTY() ESRItemSlot Slot = ESRItemSlot::Weapon;
+	/** 0 common, 1 uncommon, 2 rare, 3 epic, 4 legendary */
+	UPROPERTY() uint8 Rarity = 0;
+	UPROPERTY() int32 ItemLevel = 1;
+	UPROPERTY() float Atk = 0.f;
+	UPROPERTY() float Def = 0.f;
+	UPROPERTY() float HP = 0.f;
+	UPROPERTY() float MP = 0.f;
+	UPROPERTY() float Crit = 0.f;
+	UPROPERTY() int32 Value = 0;
+
+	bool IsValid() const { return !Name.IsEmpty(); }
+	float Score() const { return Atk * 2.f + Def * 1.5f + HP * 0.2f + MP * 0.15f + Crit * 100.f; }
 };
 
 /** Which parent material a primitive part uses. */
@@ -148,6 +181,23 @@ namespace SR
 	SLIMEREBORN_API const TArray<FSRZone>& Zones();
 	SLIMEREBORN_API const TArray<FSRQuest>& Quests();
 	SLIMEREBORN_API float XPForLevel(int32 Level);
+
+	/** Number of playable classes and their order on the title screen. */
+	constexpr int32 NumClasses = 5;
+	SLIMEREBORN_API ESRClass ClassAt(int32 DisplayIndex);
+	SLIMEREBORN_API int32 ClassDisplayIndex(ESRClass C);
+
+	// ---- Loot ---------------------------------------------------------------
+	/** Luck 0..1 pushes towards rarer items (bosses use ~0.7). */
+	SLIMEREBORN_API FSRItem RollItem(int32 Level, float Luck);
+	SLIMEREBORN_API const TCHAR* RarityName(uint8 Rarity);
+	SLIMEREBORN_API FLinearColor RarityColor(uint8 Rarity);
+	SLIMEREBORN_API FString ItemStats(const FSRItem& Item);
+
+	// ---- Places ---------------------------------------------------------------
+	/** The Tower of a Thousand Floors stands just outside the east gate. */
+	const FVector2D TowerPos(2600.f, 14800.f);
+	SLIMEREBORN_API FVector TowerDoor();
 
 	// ---- Primitive art helpers (engine basic shapes + optional /Game/SR materials) ----
 	SLIMEREBORN_API UStaticMesh* Mesh(const TCHAR* Shape);

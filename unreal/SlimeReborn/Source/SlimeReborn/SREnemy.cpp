@@ -22,8 +22,9 @@ ASREnemy::ASREnemy()
 	bUseControllerRotationYaw = false;
 }
 
-void ASREnemy::Setup(ESREnemyKind InKind, int32 InLevel, int32 InZone)
+void ASREnemy::Setup(ESREnemyKind InKind, int32 InLevel, int32 InZone, float InElite)
 {
+	EliteMult = FMath::Max(1.f, InElite);
 	Kind = InKind;
 	Level = FMath::Max(1, InLevel);
 	Zone = InZone;
@@ -46,7 +47,15 @@ void ASREnemy::BeginPlay()
 	Speed = I.Speed;
 	Reach = I.Reach;
 	Scale = I.Scale;
-	bBoss = Kind == ESREnemyKind::OrcKing;
+	bBoss = Kind == ESREnemyKind::OrcKing || EliteMult > 1.f;
+	if (EliteMult > 1.f)
+	{
+		MaxHP *= EliteMult;
+		HP = MaxHP;
+		Atk *= FMath::Sqrt(EliteMult);
+		XPValue *= EliteMult;
+		Scale *= 1.3f;
+	}
 	Aggro = bBoss ? 3800.f : (Kind == ESREnemyKind::Wolf ? 2800.f : 2200.f);
 	GetCharacterMovement()->MaxWalkSpeed = Speed;
 	Home = GetActorLocation();
@@ -120,7 +129,7 @@ void ASREnemy::BuildBody()
 
 FString ASREnemy::DisplayName() const
 {
-	return FString::Printf(TEXT("%s  Lv.%d"), SR::Enemy(Kind).Name, Level);
+	return FString::Printf(TEXT("%s%s  Lv.%d"), EliteMult > 1.f ? TEXT("Campione: ") : TEXT(""), SR::Enemy(Kind).Name, Level);
 }
 
 FVector ASREnemy::GetHeadLocation() const
@@ -182,7 +191,8 @@ bool ASREnemy::TakeHit(float Damage, AActor* Source, float Knockback, bool bHeav
 		GetCharacterMovement()->MaxWalkSpeed = Speed * 1.35f;
 		if (ASlimeCharacter* P = Cast<ASlimeCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
 		{
-			P->Oracle(TEXT("Il Re degli Orchi e' in preda alla Fame! I suoi colpi sono piu' rapidi."));
+			P->Oracle(Kind == ESREnemyKind::OrcKing ? FString(TEXT("Il Re degli Orchi e' in preda alla Fame! I suoi colpi sono piu' rapidi."))
+				: FString::Printf(TEXT("%s e' infuriato! Attacca piu' in fretta."), *DisplayName()));
 		}
 		ASRFx::Spawn(GetWorld(), ESRFxKind::Ring, GetActorLocation() - FVector(0, 0, HalfHeight - 20.f), FLinearColor(0.6f, 0.f, 0.8f), 1400.f, 0.8f);
 	}
