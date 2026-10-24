@@ -876,11 +876,11 @@ void ASlimeCharacter::TravelToGrace(int32 Index)
 	if (!G.IsValidIndex(Index) || !GraceFound.IsValidIndex(Index) || !GraceFound[Index]) return;
 	bGraceMenu = false;
 	LastGrace = Index;
-	TeleportTo(G[Index].Location + FVector(250.f, 0.f, 0.f));
+	TeleportPlayer(G[Index].Location + FVector(250.f, 0.f, 0.f));
 	Toast(G[Index].Name, TEXT("Viaggio rapido"));
 }
 
-void ASlimeCharacter::TeleportTo(const FVector& Location)
+void ASlimeCharacter::TeleportPlayer(const FVector& Location)
 {
 	const FVector P(Location.X, Location.Y, SR::HeightAt(Location.X, Location.Y) + GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() + 30.f);
 	SetActorLocation(P, false, nullptr, ETeleportType::TeleportPhysics);
@@ -1297,7 +1297,7 @@ void ASlimeCharacter::RespawnAtGrace()
 	if (VisualSpin) VisualSpin->SetVisibility(true, true);
 	SetForm(Form, false);
 	const TArray<FSRGrace>& G = SR::Graces();
-	if (G.IsValidIndex(LastGrace)) TeleportTo(G[LastGrace].Location + FVector(250.f, 0, 0));
+	if (G.IsValidIndex(LastGrace)) TeleportPlayer(G[LastGrace].Location + FVector(250.f, 0, 0));
 	Oracle(FString::Printf(TEXT("Rinato presso la Grazia \"%s\". Hai perso %d oro."), G.IsValidIndex(LastGrace) ? *G[LastGrace].Name : TEXT("?"), Lost));
 	if (ASRGameMode* GM = GetGM()) GM->OnRest();
 }

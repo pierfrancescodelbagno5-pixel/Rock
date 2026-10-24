@@ -68,7 +68,7 @@ public:
 	// ---- Travel ---------------------------------------------------------------------
 	void TravelToGrace(int32 Index);
 	void RespawnAtGrace();
-	void TeleportTo(const FVector& Location);
+	void TeleportPlayer(const FVector& Location);
 	/** Teleport to an exact floor point (used inside the tower, where the terrain height does not apply). */
 	void TeleportExact(const FVector& FloorPoint);
 

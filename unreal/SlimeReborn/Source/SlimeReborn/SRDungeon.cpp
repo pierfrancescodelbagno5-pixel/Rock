@@ -289,7 +289,7 @@ void ASRDungeon::Exit(ASlimeCharacter* Player, bool bTeleportOut)
 	Player->bInDungeon = false;
 	if (bTeleportOut)
 	{
-		Player->TeleportTo(SR::TowerDoor() + FVector(0, -400.f, 0));
+		Player->TeleportPlayer(SR::TowerDoor() + FVector(0, -400.f, 0));
 		Player->Toast(TEXT("TORRE DEI MILLE PIANI"), FString::Printf(TEXT("Piano massimo raggiunto: %d"), BestFloor));
 	}
 }

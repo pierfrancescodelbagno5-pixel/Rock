@@ -124,7 +124,7 @@ void ASRGameMode::StartGame(bool bContinue)
 	if (bContinue && LoadProgress(P))
 	{
 		const TArray<FSRGrace>& G = SR::Graces();
-		if (G.IsValidIndex(P->LastGrace)) P->TeleportTo(G[P->LastGrace].Location + FVector(250.f, 0, 0));
+		if (G.IsValidIndex(P->LastGrace)) P->TeleportPlayer(G[P->LastGrace].Location + FVector(250.f, 0, 0));
 		P->Toast(TEXT("BENTORNATO"), SR::Class(P->ClassId).Name);
 		P->Oracle(FString::Printf(TEXT("Partita caricata. Livello %d, %d abilita'."), P->Level, P->Skills.Num()));
 	}
@@ -146,7 +146,7 @@ void ASRGameMode::StartGame(bool bContinue)
 		P->GraceFound.Init(false, SR::Graces().Num());
 		if (P->GraceFound.Num() > 0) P->GraceFound[0] = true;
 		P->LastGrace = 0;
-		P->TeleportTo(SpawnSpot);
+		P->TeleportPlayer(SpawnSpot);
 		P->Toast(TEXT("ALTHERIA"), TEXT("Citta' Reale - qui inizia la tua seconda vita"));
 		P->Oracle(TEXT("Notifica: reincarnazione completata. Benvenuto nella Terra Spezzata, dove mille mondi si sono fusi in uno."));
 		P->Oracle(TEXT("Premi F1 per i comandi. La Gilda degli Avventurieri e' a sud-ovest della fontana: parla con Brann."));
